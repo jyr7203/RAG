@@ -16,7 +16,7 @@ try:
     from langchain_tavily import TavilySearch as _TavilyTool
     _TAVILY_NEW = True
 except ImportError:
-    from langchain_community.tools.tavily_search import TavilySearchResults as _TavilyTool  # type: ignore
+    from langchain_community.tools.tavily_search import TavilySearchResults as _TavilyTool
     _TAVILY_NEW = False
 from langchain_huggingface import HuggingFaceEmbeddings
 
@@ -24,14 +24,14 @@ from langchain_huggingface import HuggingFaceEmbeddings
 try:
     from langchain_chroma import Chroma
 except ImportError:
-    from langchain_community.vectorstores import Chroma  # fallback
+    from langchain_community.vectorstores import Chroma
 
 # BM25 조건부 import — rank_bm25 미설치 시 None으로 처리
 try:
     from langchain_community.retrievers import BM25Retriever
     _BM25_AVAILABLE = True
 except ImportError:
-    BM25Retriever = None  # type: ignore
+    BM25Retriever = None
     _BM25_AVAILABLE = False
 
 from config import Config
@@ -68,7 +68,7 @@ class AgentState(TypedDict):
     target_section: str
     multi_queries: List[str]
 
-    retrieved_docs: List[Any]   # ← 일반 List
+    retrieved_docs: List[Any]
     is_fallback: bool
 
     context_score: str          # "yes" / "no"
@@ -534,8 +534,8 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
         "category":        category,
     }
 
-# db 전역 인스턴스화
-vector_db = Chroma(persist_directory=Config.DB_PATH, embedding_function=get_embeddings())
+# vector_db는 서버 시작 시 startup()에서 초기화됩니다.
+vector_db = None
 
 def ensure_date_int_metadata():
     """
@@ -784,7 +784,7 @@ def web_searcher_node(state: AgentState):
     if _TAVILY_NEW:
         web_tool = _TavilyTool(max_results=3, search_depth="advanced")
     else:
-        web_tool = _TavilyTool(k=3, search_depth="advanced")  # type: ignore
+        web_tool = _TavilyTool(k=3, search_depth="advanced")
     
     query_parts = [state.get("target_date", ""), state.get("category", ""), state.get("question", "")]
     search_query = " ".join([p for p in query_parts if p]).strip()
@@ -1035,7 +1035,6 @@ def _clean_answer(text: str) -> str:
         r"<div[\s>]",     r"</div>",
         r"<table[\s>]",   r"<tr[\s>]", r"<td[\s>]",
         r"<ul[\s>]",      r"<ol[\s>]", r"<li[\s>]",
-        # [BUG FIX] 잔여 역할 태그 및 hex 오염 패턴 추가
         r"</assistant>", r"<assistant>",
         r"<hex>",        r"</hex>",
         r"<\|assistant\|>", r"<\|user\|>",
@@ -1466,7 +1465,6 @@ def build_graph():
     workflow.add_edge("answer_generator", "hallucination_grader")
     workflow.add_conditional_edges(
         "hallucination_grader", route_hallucination,
-        # 주의: END는 langgraph.graph에서 임포트해야 합니다.
         {"Faithful": END, "Hallucination_Detected": "answer_regenerator"},
     )
     workflow.add_edge("answer_regenerator", "hallucination_grader")
@@ -1474,67 +1472,68 @@ def build_graph():
     return workflow.compile()
 
 
-app = build_graph()
+graph = build_graph()
 
+# ── FastAPI 앱 초기화 ───────────────────────────────────────────────────────────
+from fastapi import FastAPI
+from pydantic import BaseModel
+
+api = FastAPI(title="Kanana 금융 에이전트 API", version="0.1.0")
+
+# ── 서버 시작 시 DB 및 메타데이터 초기화 ──────────────────────────────────────
+@api.on_event("startup")
+def startup():
+    global vector_db
+    vector_db = Chroma(persist_directory=Config.DB_PATH, embedding_function=get_embeddings())
+    ensure_date_int_metadata()
+    log.info("서버 시작 완료. DB 및 메타데이터 초기화 완료.")
+
+# ── 요청/응답 모델 ─────────────────────────────────────────────────────────────
+class AskRequest(BaseModel):
+    question: str
+
+class AskResponse(BaseModel):
+    question: str
+    answer: str
+    elapsed: str
+
+# ── 헬스체크 ───────────────────────────────────────────────────────────────────
+@api.get("/health")
+def health():
+    return {"ok": True}
+
+# ── 질문 엔드포인트 ────────────────────────────────────────────────────────────
+@api.post("/ask", response_model=AskResponse)
+def ask(req: AskRequest):
+    question = req.question
+    inputs = {
+        "question": question,
+        "loop_count": 0,
+        "retry_count": 0,
+        "target_date_int": 0,
+        "start_date_int":  0,
+        "end_date_int":    0,
+    }
+
+    start_time   = datetime.now()
+    result       = graph.invoke(inputs, {"recursion_limit": 50})
+    elapsed      = datetime.now() - start_time
+    elapsed_str  = f"{int(elapsed.total_seconds() // 60)}분 {int(elapsed.total_seconds() % 60)}초"
+    final_answer = result.get("answer", "(답변 없음)")
+
+    log.info("=" * 60)
+    log.info(f"[질문] {question}")
+    log.info(f"[소요시간] {elapsed_str}")
+    log.info(f"[답변]\n{final_answer}")
+    log.info("=" * 60)
+
+    return AskResponse(
+        question=question,
+        answer=final_answer,
+        elapsed=elapsed_str,
+    )
 
 # ── 진입점 ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-
-    # Windows 멀티프로세싱 안전 처리
-    import multiprocessing
-    multiprocessing.freeze_support()
-
-    # DB 인스턴스화
-    vector_db = Chroma(persist_directory=Config.DB_PATH, embedding_function=get_embeddings())
-
-    # DB에 date_int 메타데이터가 없으면 자동으로 추가 (최초 1회만 실제 업데이트 발생)
-    ensure_date_int_metadata()
-
-    test_questions = [
-        "3월, 4월 엔화"
-    ]
-
-    for question in test_questions:
-        inputs = {
-            "question": question,
-            "loop_count": 0,
-            "retry_count": 0,
-            "target_date_int": 0,
-            "start_date_int":  0,
-            "end_date_int":    0,
-        }
-
-        print("\n" + "🚀 " + "="*60)
-        print(f"질문: {question}")
-        print("="*63)
-
-        final_answer = "(답변 없음)"
-        start_time = datetime.now()
-
-        for output in app.stream(inputs, {"recursion_limit": 50}):
-            for node_name, state_val in output.items():
-                print(f"\n  [노드 완료: {node_name}]")
-                if "answer" in state_val and state_val["answer"]:
-                    final_answer = state_val["answer"]
-
-        end_time = datetime.now()
-        elapsed = end_time - start_time
-        elapsed_str = f"{int(elapsed.total_seconds() // 60)}분 {int(elapsed.total_seconds() % 60)}초"
-
-        print("\n" + "="*70)
-        print("✨ [최종 분석 보고서]")
-        print("-" * 70)
-        for para in final_answer.split('\n'):
-            if para.strip():
-                print(textwrap.fill(para, width=75, subsequent_indent='  '))
-            else:
-                print()
-        print("=" * 70)
-        print(f"⏱️  소요시간: {elapsed_str}")
-
-        # 로그 기록
-        log.info("=" * 60)
-        log.info(f"[질문] {question}")
-        log.info(f"[소요시간] {elapsed_str}")
-        log.info(f"[답변]\n{final_answer}")
-        log.info("=" * 60)
+    import uvicorn
+    uvicorn.run("main:api", host="0.0.0.0", port=Config.APP_PORT, reload=False)

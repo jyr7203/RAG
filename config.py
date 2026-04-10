@@ -3,7 +3,7 @@ import torch
 import os
 from dotenv import load_dotenv
 
-# .env 파일 로드
+# .env 파일
 load_dotenv()
 
 class Config:
@@ -24,8 +24,7 @@ class Config:
         raise ValueError("TAVILY_API_KEY가 .env 파일에 설정되지 않았습니다.")
     os.environ["TAVILY_API_KEY"] = TAVILY_API_KEY
 
-    # 모델 Kanana 설정
-    # 로컬 모델 파일 경로 (None이면 HuggingFace에서 자동 다운로드)
+    # 모델 Kanana 설정 - 로컬 모델 파일 경로
     KANANA_MODEL_PATH = os.getenv("KANANA_MODEL_PATH", None)
     LLM_MODEL = KANANA_MODEL_PATH if KANANA_MODEL_PATH else "kakaocorp/kanana-1.5-2.1b-instruct-2505"
 
@@ -37,6 +36,9 @@ class Config:
     EMBED_MODEL_NAME   = "BAAI/bge-m3"
     EMBED_MODEL_KWARGS = {'device': DEVICE}
     EMBED_ENCODE_KWARGS = {'normalize_embeddings': True}
+
+    # 서버 포트
+    APP_PORT = int(os.getenv("APP_PORT", 8000))
 
     @classmethod
     def ensure_dirs(cls):
