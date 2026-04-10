@@ -206,12 +206,12 @@ if __name__ == "__main__":
             latest_doc  = results['documents'][latest_idx]
 
             print("\n" + "=" * 50)
-            print("📢 [DB LATEST DATA SAMPLE]")
-            print(f"📅 날짜: {latest_meta.get('date')}")
-            print(f"📂 섹션: {latest_meta.get('section')}")
-            print(f"🏷️  항목: {latest_meta.get('item')}")
+            print(" [DB LATEST DATA SAMPLE]")
+            print(f" 날짜: {latest_meta.get('date')}")
+            print(f" 섹션: {latest_meta.get('section')}")
+            print(f"  항목: {latest_meta.get('item')}")
             print("-" * 50)
-            print(f"📝 내용 요약:\n{latest_doc[:200]}...")
+            print(f" 내용 요약:\n{latest_doc[:200]}...")
             print("=" * 50 + "\n")
         else:
             log.warning("DB에 저장된 문서가 없어 내용을 확인할 수 없습니다.")
