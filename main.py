@@ -20,13 +20,13 @@ except ImportError:
     _TAVILY_NEW = False
 from langchain_huggingface import HuggingFaceEmbeddings
 
-# [FIX-1] langchain_community.vectorstores.Chroma deprecated → langchain_chroma 우선 사용
+# langchain_chroma 우선 사용
 try:
     from langchain_chroma import Chroma
 except ImportError:
     from langchain_community.vectorstores import Chroma  # fallback
 
-# [FIX-2] BM25 조건부 import — rank_bm25 미설치 시 None으로 처리
+# BM25 조건부 import — rank_bm25 미설치 시 None으로 처리
 try:
     from langchain_community.retrievers import BM25Retriever
     _BM25_AVAILABLE = True
@@ -62,9 +62,9 @@ class AgentState(TypedDict):
 
     category: str
     target_date: str
-    target_date_int: int    # [FIX-3] Chroma $gte/$lte용 YYYYMMDD int
-    start_date_int: int     # [FIX-3] 범위 검색 시작
-    end_date_int: int       # [FIX-3] 범위 검색 종료
+    target_date_int: int    # Chroma $gte/$lte용 YYYYMMDD int
+    start_date_int: int     # 범위 검색 시작
+    end_date_int: int       # 범위 검색 종료
     target_section: str
     multi_queries: List[str]
 
@@ -118,9 +118,7 @@ def ask_kanana(prompt: str, max_tokens: int = 1024, temp: float = 0.1) -> str:
                 plain_prompt = f"<|user|>\n{prompt}"
                 result = decoded.replace(plain_prompt, "") if plain_prompt in decoded else decoded
 
-            # [BUG FIX] skip_special_tokens=True 에도 <|assistant|>/<|user|> 가
-            # 특수 토큰으로 미등록된 경우 decoded에 그대로 남는 문제.
-            # result 내에 잔존하는 모든 역할 토큰을 후처리로 제거.
+            # result 내에 잔존하는 모든 역할 토큰 후처리로 제거.
             if "<|user|>" in result:
                 result = result.split("<|user|>")[0]
 
@@ -137,15 +135,13 @@ def ask_kanana(prompt: str, max_tokens: int = 1024, temp: float = 0.1) -> str:
                     torch.cuda.empty_cache()
             raise
 
-# ── 노드: Input Router ─────────────────────────────────────────────────────────
+# ── Input Router ─────────────────────────────────────────────────────────
 def input_router_node(state: AgentState):
     print("\n--- [NODE] Input Router ---")
     current_time_str = datetime.now().strftime('%Y-%m-%d %H:%M')
     question = state["question"]
 
-    # [BUG FIX] LLM 호출 전 general/off_topic을 먼저 키워드로 선별.
-    # "넌 어떤 일을 할 수 있어?" 같은 질문은 LLM이 finance로 오분류하는 경우가 있어
-    # 키워드 기반 사전 판단을 LLM 호출보다 먼저 적용.
+    #LLM 호출 전 키워드로 선별
     _general_pre = [
         "시스템", "누구", "안녕", "뭐하는", "이건", "너는", "도와줘",
         "어떤 일", "무슨 일", "할 수 있", "뭘 할", "뭐 해줄", "어떻게 써",
@@ -238,8 +234,6 @@ REASON: 판단 근거 한 줄"""
         "topic": topic,
         "is_fallback": not requires_search,
         "analysis_note": res,
-        # loop_count / retry_count는 Annotated[int, operator.add] 누적 필드이므로
-        # 여기서 반환하지 않음. 초기화는 __main__의 inputs 딕셔너리에서 수행됨.
         "retrieved_docs": [],
     }
 
@@ -252,7 +246,7 @@ def route_after_input(state: AgentState):
     return "direct_answer"
 
 
-# ── 유틸: 상대 날짜 Python 직접 계산 ─────────────────────────────────────────
+# ── 상대 날짜 Python 계산 ─────────────────────────────────────────
 _REL_DATE_PATTERNS = [
     (re.compile(r"(\d+)\s*일\s*전"),      lambda m, n: n - timedelta(days=int(m.group(1)))),
     (re.compile(r"(\d+)\s*주\s*전"),      lambda m, n: n - timedelta(weeks=int(m.group(1)))),
@@ -280,7 +274,7 @@ def _date_to_int(date_str: str) -> int:
     return int(date_str.replace("-", ""))
 
 
-# ── 노드: Multi-Query Generator ────────────────────────────────────────────────
+# ── Multi-Query Generator ────────────────────────────────────────────────
 def multi_query_generator_node(state: AgentState):
     print("\n--- [NODE] Multi-Query Generator ---")
     now = datetime.now()
@@ -289,7 +283,6 @@ def multi_query_generator_node(state: AgentState):
     time_str = now.strftime("%H:%M")
     question = state["question"]
 
-    # 헬퍼 함수가 있다고 가정 (상단에 정의된 _extract_relative_date 사용)
     rel_date = _extract_relative_date(question, now)
     date_hint = (
         f"\n[날짜 힌트] 질문의 날짜 표현 계산 결과: {rel_date} → DATE에 이 값을 사용하세요."
@@ -382,8 +375,7 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
             else:
                 category = "기타"
 
-    # [핵심] 날짜 범위 결정 로직
-    # 연도 범위를 먼저 계산한 뒤 나머지 조건 처리
+    # 날짜 범위 결정 로직 - 연도 범위 먼저 계산 후 나머지 조건 처리
     try:
         target_date_obj = datetime.strptime(target_date, "%Y-%m-%d")
     except ValueError:
@@ -394,8 +386,7 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
 
     # ── 연(年) 단위 범위 감지 ──────────────────────────────────────────────────
     # 절대 연도: 4자리(2024년), 2자리 약칭(25년→2025) 모두 findall로 전체 추출.
-    # [BUG FIX] "25년이랑 26년 비교" 같은 두 연도 비교 쿼리를 위해
-    # re.search → re.findall 로 변경, 여러 연도를 모두 추출해 min~max 범위로 처리.
+    # "25년이랑 26년 비교" 두 연도 비교 - re.findall 여러 연도를 모두 추출해 min~max 범위 처리
     _abs_year_list  = [int(y) for y in re.findall(r"\b(20\d{2}|19\d{2})\s*년", question)]
     # 2자리 약칭: "25년"→2025, 단 이미 4자리로 파싱된 것과 중복 제거
     _abbr_year_list = [2000 + int(y) for y in re.findall(r"(?<!\d)([2-9]\d)\s*년", question)
@@ -412,7 +403,7 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
         None
     )
 
-    # 단일 절대 연도 (단독 사용 경로)
+    # 단일 절대 연도
     abs_year = _all_abs_years[0] if len(_all_abs_years) == 1 else None
 
     # 상대 연도 수 결정
@@ -525,7 +516,6 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
             start_date_str = target_date
             end_date_str   = target_date
 
-    # _date_to_int 함수가 있다고 가정
     target_date_int = _date_to_int(target_date)
     start_date_int = _date_to_int(start_date_str)
     end_date_int   = _date_to_int(end_date_str)
@@ -546,7 +536,6 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
 
 # db 전역 인스턴스화
 vector_db = Chroma(persist_directory=Config.DB_PATH, embedding_function=get_embeddings())
-
 
 def ensure_date_int_metadata():
     """
@@ -595,7 +584,7 @@ def get_target_item(target_section: str) -> str | None:
         return "금융지표_종합"
     return None
 
-# ── 노드: Check Availability ───────────────────────────────────────────────────
+# ── Check Availability ───────────────────────────────────────────────────
 def check_availability_node(state: AgentState):
     log.info("\n--- [NODE] Check Availability ---")
     target_date    = state.get("target_date", "")
@@ -603,7 +592,7 @@ def check_availability_node(state: AgentState):
     end_date_int   = state.get("end_date_int", 0)
     target_item    = get_target_item(state.get("target_section"))
 
-    # ── 단일 날짜 존재 여부 확인 ($eq 문자열 → 항상 안정적) ──
+    # ── 단일 날짜 존재 여부 확인 ──
     def _check_single(date_str: str) -> bool:
         try:
             f = {"date": {"$eq": date_str}}
@@ -733,7 +722,7 @@ def _search_with_fallback(query: str, start_date_int: int, end_date_int: int,
     except Exception as e:
         log.warning(f"[RAG 3차 전체 검색 실패] {e}")
 
-    # ── 4차 시도: DB 전체 스캔 후 날짜 문자열 후처리 (범위 쿼리 최후 수단) ──
+    # ── 4차 시도: DB 전체 스캔 후 날짜 문자열 후처리 ──
     if start_str and end_str and start_str != end_str:
         try:
             all_in_range = vector_db.get(include=["documents", "metadatas"])
@@ -753,7 +742,7 @@ def _search_with_fallback(query: str, start_date_int: int, end_date_int: int,
     return []
 
 
-# ── 노드: RAG Searcher ─────────────────────────────────────────────────────────
+# ── RAG Searcher ─────────────────────────────────────────────────────────
 def rag_searcher_node(state: AgentState):
     log.info("\n--- [NODE] RAG Searcher ---")
     try:
@@ -785,12 +774,11 @@ def rag_searcher_node(state: AgentState):
         return {"retrieved_docs": [], "is_fallback": True}
 
 
-# ── 노드: Web Searcher ─────────────────────────────────────────────────────────
+# ── Web Searcher ─────────────────────────────────────────────────────────
 def web_searcher_node(state: AgentState):
     log.info("\n--- [NODE] Web Searcher ---")
     if not os.environ.get("TAVILY_API_KEY"):
         log.warning("TAVILY_API_KEY가 없습니다. 기존 문서를 반환합니다.")
-        # [수정] 웹 검색 노드를 거쳤음을 표시하기 위해 loop_count 1 반환
         return {"retrieved_docs": state.get("retrieved_docs", []), "loop_count": 1}
     
     if _TAVILY_NEW:
@@ -818,7 +806,7 @@ def web_searcher_node(state: AgentState):
             title   = r.get('title', '') or ''
             content = r.get('content', '') or ''
 
-            # LaTeX 오염 콘텐츠는 저장 자체를 건너뜀
+            # LaTeX 오염 콘텐츠는 저장 자체 패스
             if _WEB_NOISE_RE.search(content):
                 log.warning(f"[Web Sanitize] LaTeX 오염 문서 제외: {title[:60]}")
                 continue
@@ -840,11 +828,10 @@ def web_searcher_node(state: AgentState):
 
     final_docs = state.get("retrieved_docs", []) + web_docs
     
-    # [수정] 반환 값에 loop_count: 1을 추가하여 기존 상태에 +1 누적
     return {"retrieved_docs": final_docs, "loop_count": 1}
 
 
-# ── 노드: Context Filter ───────────────────────────────────────────────────────
+# ── Context Filter ───────────────────────────────────────────────────────
 def context_filter_node(state: AgentState):
     print("\n--- [NODE] Context Filter ---")
     question = state["question"]
@@ -857,9 +844,7 @@ def context_filter_node(state: AgentState):
         print(">> 검색된 문서 없음.")
         return {"retrieved_docs": [], "context_score": "no"}
 
-    # [핵심 방어 로직] 문서가 1개이거나, 이미 웹 검색을 다녀왔다면 필터링 생략
-    # 소형 모델의 판단 오류(Hallucination 'NONE')로 인해 소중한 DB 데이터가 날아가는 것을 방지합니다.
-    # 2~3개 문서도 LLM 필터링 대신 통과시켜 DB 데이터 손실 방지
+    # 문서가 1개이거나, 이미 웹 검색을 다녀왔다면, 2~3개 문서도 LLM 필터링 생략 -> 데이터 손실 방지
     if len(documents) <= 3 or loop_count >= 1:
         print(f">> [Skip] 검색된 문서가 {len(documents)}개이거나 웹 검색 데이터입니다. 안전을 위해 필터링을 통과시킵니다.")
         return {"retrieved_docs": documents, "context_score": "yes"}
@@ -914,7 +899,7 @@ def context_filter_node(state: AgentState):
     return {"retrieved_docs": filtered_docs, "context_score": "yes"}
 
 
-# ── 노드: Context Reranker ─────────────────────────────────────────────────────
+# ── Context Reranker ─────────────────────────────────────────────────────
 def context_reranker_node(state: AgentState):
     print("\n--- [NODE] Context Reranker ---")
     question = state["question"]
@@ -964,7 +949,7 @@ def context_reranker_node(state: AgentState):
     return {"retrieved_docs": top_docs}
 
 
-# ── 노드: Context Evaluator ────────────────────────────────────────────────────
+# ── Context Evaluator ────────────────────────────────────────────────────
 def context_evaluator_node(state: AgentState):
     print("\n--- [NODE] Context Evaluator ---")
     question = state["question"]
@@ -974,7 +959,6 @@ def context_evaluator_node(state: AgentState):
 
     if not docs:
         print(">> 문서 없음. 웹 검색 경로 활성화 (또는 답변 생성 진입).")
-        # [수정] loop_count 누적을 제거함
         return {"is_fallback": True, "context_score": "no"}
 
     print(f">> {len(docs)}개 문서 평가 중... (loop_count={loop_count})")
@@ -1015,7 +999,6 @@ def context_evaluator_node(state: AgentState):
     return {
         "is_fallback": not is_enough,
         "context_score": "yes" if is_enough else "no",
-        # [수정] loop_count 반환 삭제
     }
 
 
@@ -1070,15 +1053,15 @@ def _clean_answer(text: str) -> str:
     for line in lines:
         stripped = line.strip()
 
-        # 방어 1: 비정상 특수 기호 도배
+        # 비정상 특수 기호 도배 방지
         if "]]]" in stripped or "[[[" in stripped or re.search(r"={5,}", stripped):
             break
 
-        # 방어 3: LaTeX / HTML / 역할 태그 오염
+        # LaTeX / HTML / 역할 태그 오염 방지
         if _contam_re.search(stripped):
             break
 
-        # 방어 2-a: ※ 면책 주석 3줄 연속 차단
+        # 면책 주석 3줄 연속 차단
         if stripped.startswith("※") or stripped.startswith("(※"):
             disclaimer_count += 1
             if disclaimer_count >= 3:
@@ -1086,7 +1069,7 @@ def _clean_answer(text: str) -> str:
         else:
             disclaimer_count = 0
 
-        # 방어 4: [참고 문헌] 섹션 줄 수 제한
+        # [참고 문헌] 섹션 줄 수 제한
         if re.search(r"^\[참고\s*문헌\]|^참고\s*문헌[:\s]", stripped):
             in_ref_section = True
             ref_section_line_count = 0
@@ -1099,9 +1082,7 @@ def _clean_answer(text: str) -> str:
                 cleaned.append(stripped[:120])
                 continue
 
-        # 방어 2: 반복 문장 감지 (참고문헌 섹션 제외)
-        # [BUG FIX] 범위 쿼리 답변에서 날짜·수치가 다른 유사 구조 줄을 오탐하는 문제.
-        # 임계값을 30자로 올리고, 수치(숫자/bp/%)가 포함된 줄은 비교 대상에서 제외.
+        # 반복 문장 감지 (참고문헌 섹션 제외)
         if not in_ref_section and stripped and len(stripped) >= 30:
             _has_numeric = bool(re.search(r'\d', stripped))
             if not _has_numeric:
@@ -1124,8 +1105,6 @@ def _clean_answer(text: str) -> str:
         final_text = final_text.split("<|user|>")[0].strip()
 
     # 후처리 2: [상세 분석] 내부 인라인 참고문헌 줄 제거
-    # "[1] 2026-04-09 | 제목" 형태로 본문 안에 삽입된 참고문헌 항목 제거
-    # (단, [참고 문헌] 섹션 내부 줄은 유지)
     ref_sec_start = re.search(r'(^\[참고\s*문헌\]|^참고\s*문헌[:\s])', final_text, re.MULTILINE)
     ref_sec_pos = ref_sec_start.start() if ref_sec_start else len(final_text)
     body = final_text[:ref_sec_pos]
@@ -1139,8 +1118,7 @@ def _clean_answer(text: str) -> str:
     if len(ref_matches) >= 2:
         final_text = final_text[:ref_matches[1].start()].strip()
 
-    # 후처리 3-a: 참고문헌 섹션 내 플레이스홀더 줄 제거
-    # LLM이 프롬프트 예시를 그대로 복사하는 패턴 방어
+    # 후처리 3-a: 참고문헌 섹션 내 플레이스홀더 줄 제거 -> LLM이 프롬프트 예시를 그대로 복사하는 패턴 방어
     _placeholder_re = re.compile(
         r'^\s*(\[번호\]|\[숫자\])\s.*$'           # [번호] 날짜 | 제목
         r'|^\s*\[\d+\]\s*날짜\s*\|.*$'            # [1] 날짜 | 제목
@@ -1160,8 +1138,7 @@ def _clean_answer(text: str) -> str:
     return final_text
 
 
-# ── 노드: Answer Generator ─────────────────────────────────────────────────────
-# ── 노드: Answer Generator ─────────────────────────────────────────────────────
+# ── Answer Generator ─────────────────────────────────────────────────────
 def answer_generator_node(state: AgentState):
     print("\n--- [NODE] Answer Generator ---")
     topic = state.get("topic")
@@ -1189,7 +1166,7 @@ def answer_generator_node(state: AgentState):
     start_date_int = state.get("start_date_int", 0)
     end_date_int   = state.get("end_date_int", 0)
     is_range_query = (start_date_int and end_date_int and start_date_int != end_date_int)
-    # 범위 쿼리면 문서당 더 많은 내용을 포함 (시계열 비교 답변 품질 향상)
+    # 범위 쿼리면 문서당 더 많은 내용 포함
     max_chars_per_doc = 1200 if is_range_query else 900
 
     formatted_context = ""
@@ -1207,8 +1184,7 @@ def answer_generator_node(state: AgentState):
             f"내용: {content_preview}\n\n"
         )
 
-    # [핵심] 프롬프트 제약조건 초강화
-    # 범위 쿼리일 경우 비교/추이 분석을 요청하는 추가 지시 생성
+    # 프롬프트 제약조건 초강화, 범위 쿼리일 경우 비교/추이 분석 요청
     range_hint = ""
     if is_range_query:
         start_str_hint = str(start_date_int)
@@ -1249,8 +1225,7 @@ def answer_generator_node(state: AgentState):
     gen_max_tokens = 1500 if is_range_query else 1200
     raw_answer = ask_kanana(prompt, max_tokens=gen_max_tokens, temp=0.1)
 
-    # [BUG FIX] LLM이 데이터 없음 상황에서 "네, 언제든 말씀해 주세요" 같은
-    # 마무리 멘트를 답변으로 생성하는 경우 감지 → 명시적 안내 메시지로 교체
+    # 데이터 없음 상황은 명시적 안내 메시지
     _filler_patterns = [
         r"^네[,.]?\s*(언제든|추가로|궁금한)",
         r"^언제든지\s*(말씀|질문)",
@@ -1274,7 +1249,7 @@ def answer_generator_node(state: AgentState):
 
 
 
-# ── 노드: Hallucination Grader ─────────────────────────────────────────────────
+# ── Hallucination Grader ─────────────────────────────────────────────────
 def hallucination_grader_node(state: AgentState):
     print("\n--- [NODE] Hallucination Grader ---")
     answer = state.get("answer")
@@ -1299,10 +1274,7 @@ def hallucination_grader_node(state: AgentState):
     web_doc_count = sum(1 for d in documents if d.metadata.get("item") == "웹데이터")
     is_mostly_web = web_doc_count >= len(documents) // 2
 
-    # [BUG FIX] "데이터 없음" 스킵은 순수 DB 답변에만 적용.
-    # 웹 문서가 절반 이상인 경우 LLM이 "찾을 수 없습니다"를 앞에 붙이고
-    # 실제 답변을 이어가는 패턴이 있어 환각 검사를 잘못 통과시킴.
-    # → DB 전용 경로일 때만 no_data 스킵을 허용.
+    # "데이터 없음" 스킵은 순수 DB 답변에만 적용.
     _no_data_markers = ["찾을 수 없습니다", "데이터가 없", "정보가 없", "관련 정보를 찾"]
     answer_str = str(answer)
     if not is_mostly_web and any(m in answer_str for m in _no_data_markers):
@@ -1314,7 +1286,7 @@ def hallucination_grader_node(state: AgentState):
         return {"hallucination_score": "yes", "analysis_note": "데이터 없음 응답 → PASS"}
 
     if is_mostly_web:
-        # 웹 검색 기반 답변은 수치 검증이 어려우므로 구조 검증만 수행
+        # 웹 검색 기반 답변은 구조 검증만 수행
         prompt = f"""아래 [답변]이 금융 분야에 관한 내용인지, 그리고 금융과 전혀 무관한 내용(예: 바탕화면 정리, 요리법 등)이 포함되어 있는지 확인하세요.
 
 [답변]
@@ -1328,7 +1300,7 @@ def hallucination_grader_node(state: AgentState):
         res = ask_kanana(prompt, max_tokens=10, temp=0.0)
         first_token = "PASS" if "PASS" in res.strip().upper() else "FAIL"
     else:
-        # RAG(DB) 기반 답변은 수치 정합성 검증
+        # DB 기반 답변은 수치 정합성 검증
         prompt = f"""아래 [답변]의 수치가 [근거 문서]에 있는 수치와 일치하는지 확인하세요.
 
 [근거 문서] (핵심 수치만 확인)
@@ -1387,7 +1359,7 @@ def route_hallucination(state: AgentState):
     return "Hallucination_Detected"
 
 
-# ── 노드: Answer Regenerator (자가 교정 루프) ──────────────────────────────────
+# ── Answer Regenerator ──────────────────────────────────
 def answer_regenerator_node(state: AgentState):
     print("\n--- [NODE] Answer Regenerator (Self-Correction Loop) ---")
     question = state["question"]
@@ -1441,9 +1413,6 @@ def answer_regenerator_node(state: AgentState):
     
     print(">> 재작성 완료.")
 
-    # [BUG FIX] retry_count는 Annotated[int, operator.add]이므로 반환값이 기존값에 누적됨.
-    # current_retry + 1을 반환하면 state = current_retry + (current_retry + 1)이 되어 이중 누적 발생.
-    # 항상 1만 반환해야 operator.add에 의해 올바르게 +1씩 누적됨.
     return {"answer": cleaned_answer, "retry_count": 1}
 
 
@@ -1515,15 +1484,14 @@ if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
 
-    # DB 인스턴스화 (if __name__ 안에서 초기화해야 Windows에서 멀티프로세싱 오류 방지)
+    # DB 인스턴스화
     vector_db = Chroma(persist_directory=Config.DB_PATH, embedding_function=get_embeddings())
 
     # DB에 date_int 메타데이터가 없으면 자동으로 추가 (최초 1회만 실제 업데이트 발생)
     ensure_date_int_metadata()
 
     test_questions = [
-        "3월, 4월 엔화",
-        "주식 종목 추천"
+        "3월, 4월 엔화"
     ]
 
     for question in test_questions:
@@ -1541,12 +1509,17 @@ if __name__ == "__main__":
         print("="*63)
 
         final_answer = "(답변 없음)"
-        # recursion_limit을 넉넉히 주어 루프 중간에 끊기지 않도록 방지
+        start_time = datetime.now()
+
         for output in app.stream(inputs, {"recursion_limit": 50}):
             for node_name, state_val in output.items():
                 print(f"\n  [노드 완료: {node_name}]")
                 if "answer" in state_val and state_val["answer"]:
                     final_answer = state_val["answer"]
+
+        end_time = datetime.now()
+        elapsed = end_time - start_time
+        elapsed_str = f"{int(elapsed.total_seconds() // 60)}분 {int(elapsed.total_seconds() % 60)}초"
 
         print("\n" + "="*70)
         print("✨ [최종 분석 보고서]")
@@ -1557,3 +1530,11 @@ if __name__ == "__main__":
             else:
                 print()
         print("=" * 70)
+        print(f"⏱️  소요시간: {elapsed_str}")
+
+        # 로그 기록
+        log.info("=" * 60)
+        log.info(f"[질문] {question}")
+        log.info(f"[소요시간] {elapsed_str}")
+        log.info(f"[답변]\n{final_answer}")
+        log.info("=" * 60)
