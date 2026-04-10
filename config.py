@@ -18,7 +18,7 @@ class Config:
     LOG_DIR  = os.path.join(BASE_DIR, "logs")
     LOG_FILE = os.path.join(LOG_DIR, "kanana_agent.log")
 
-    # API 키 (.env에서 로드)
+    # API 키 (.env 로드)
     TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
     if not TAVILY_API_KEY:
         raise ValueError("TAVILY_API_KEY가 .env 파일에 설정되지 않았습니다.")
@@ -56,4 +56,4 @@ if __name__ == "__main__":
     print(f"LOG_DIR   : {Config.LOG_DIR}")
     print(f"LLM_MODEL : {Config.LLM_MODEL}")
     print(f"DEVICE    : {Config.DEVICE}")
-    print(f"TAVILY_API_KEY 로드: {'✅' if Config.TAVILY_API_KEY else '❌'}")
+    print(f"TAVILY_API_KEY 로드: {'Yes' if Config.TAVILY_API_KEY else 'No'}")
