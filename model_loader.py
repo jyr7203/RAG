@@ -98,3 +98,4 @@ class KananaModel:
 if __name__ == "__main__":
     model, tokenizer = KananaModel.get_model()
     print("출력 테스트: 로드가 성공했습니다.")
+
