@@ -32,6 +32,6 @@ if __name__ == "__main__":
     print("--- 로그 테스트 종료 ---")
 
     if os.path.exists(Config.LOG_FILE):
-        print(f"✅ 로그 파일 생성 확인: {Config.LOG_FILE}")
+        print(f"로그 파일 생성 확인: {Config.LOG_FILE}")
     else:
-        print("❌ 로그 파일 생성 실패")
+        print("로그 파일 생성 실패")
