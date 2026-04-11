@@ -146,6 +146,8 @@ def input_router_node(state: AgentState):
         "시스템", "누구", "안녕", "뭐하는", "이건", "너는", "도와줘",
         "어떤 일", "무슨 일", "할 수 있", "뭘 할", "뭐 해줄", "어떻게 써",
         "소개", "기능", "사용법", "넌 뭐", "넌 어떤", "당신은 누구", "당신은 뭐",
+        "가 뭐야", "이 뭐야", "란 뭐야", "는 뭐야", "가 뭐지", "이 뭐지",
+        "란 무엇", "는 무엇", "뭐야", "뭐지", "이란", "이란 무엇", "무엇인가",
     ]
     # off_topic 사전 판단 키워드 — 감정 표현/욕설 또는 투자 조언 요청
     _off_topic_pre = [
@@ -158,28 +160,19 @@ def input_router_node(state: AgentState):
         "사야 해", "사야해", "투자해도 돼", "투자 해도 돼",
         "종목 추천", "어디 투자", "어디에 투자",
     ]
-    # 금융 범위 외 자산 — 개별 종목/암호화폐는 off_topic으로 처리
-    _out_of_scope = [
-        "비트코인", "이더리움", "리플", "도지코인", "코인", "암호화폐", "NFT",
-        "삼성전자", "카카오", "네이버", "현대차", "LG", "SK하이닉스",
-        "애플", "테슬라", "엔비디아", "구글", "아마존", "마이크로소프트",
-        "어떻게 생각해", "어떻게 생각하", "의견", "전망 어때", "어떨 것 같",
-    ]
     _finance_keywords = [
         "금리", "환율", "달러", "엔화", "유로", "주가", "NDF", "CDS",
         "금융", "채권", "주식", "원화", "증시", "코스피", "나스닥", "환", "이자",
         "관세", "트럼프", "연준", "기준금리", "국채", "펀드", "ETF", "선물",
-        "뉴욕", "증시", "시황", "지수", "SP500", "다우", "닛케이",
     ]
 
     has_general_kw  = any(k in question for k in _general_pre)
     has_finance_kw  = any(k in question for k in _finance_keywords)
     has_off_topic   = any(k in question for k in _off_topic_pre)
     has_invest_advice = any(k in question for k in _invest_advice)
-    has_out_of_scope = any(k in question for k in _out_of_scope)
 
-    # off_topic 사전 판단 — 감정/욕설, 투자 조언, 범위 외 자산이면 바로 off_topic 확정
-    if has_off_topic or has_invest_advice or has_out_of_scope:
+    # off_topic 사전 판단 — 감정/욕설 또는 투자 조언 요청이면 바로 off_topic 확정
+    if has_off_topic or has_invest_advice:
         print(f">> topic=off_topic | requires_search=False (사전 감정/욕설 판단)")
         return {
             "topic": "off_topic",
@@ -811,35 +804,44 @@ def web_searcher_node(state: AgentState):
     )
     try:
         results = web_tool.invoke({"query": search_query})
-        # Tavily 응답이 list가 아닌 경우 처리
+
+        # langchain-tavily 0.2.x: 응답이 문자열인 경우 직접 Document로 변환
         if isinstance(results, str):
-            log.warning(f"[Web Searcher] Tavily 응답이 문자열 형태입니다. 건너뜁니다.")
-            results = []
-        for r in results:
-            # r이 dict가 아닌 경우 처리
-            if not isinstance(r, dict):
-                log.warning(f"[Web Searcher] 예상치 못한 응답 형태: {type(r)}")
-                continue
-            title   = r.get('title', '') or ''
-            content = r.get('content', '') or ''
+            if results.strip():
+                doc = Document(
+                    page_content=f"[Web] {search_query}\n{results[:1600]}",
+                    metadata={
+                        "date": state.get("target_date"),
+                        "item": "웹데이터",
+                        "url": "Tavily Search",
+                    }
+                )
+                web_docs.append(doc)
+                log.info(f"[Web Searcher] 문자열 응답 처리 완료 ({len(results)}자)")
+        else:
+            # list of dict 형태 처리
+            for r in results:
+                if not isinstance(r, dict):
+                    log.warning(f"[Web Searcher] 예상치 못한 응답 형태: {type(r)}")
+                    continue
+                title   = r.get('title', '') or ''
+                content = r.get('content', '') or ''
 
-            # LaTeX 오염 콘텐츠는 저장 자체 패스
-            if _WEB_NOISE_RE.search(content):
-                log.warning(f"[Web Sanitize] LaTeX 오염 문서 제외: {title[:60]}")
-                continue
+                # LaTeX 오염 콘텐츠는 저장 자체 패스
+                if _WEB_NOISE_RE.search(content):
+                    log.warning(f"[Web Sanitize] LaTeX 오염 문서 제외: {title[:60]}")
+                    continue
 
-            # 콘텐츠를 800자로 미리 잘라 LLM 컨텍스트 낭비 방지
-            content_preview = content[:800]
-
-            doc = Document(
-                page_content=f"[Web] {title}\n{content_preview}",
-                metadata={
-                    "date": state.get("target_date"),
-                    "item": "웹데이터",
-                    "url": r.get('url', '출처 없음'),
-                }
-            )
-            web_docs.append(doc)
+                content_preview = content[:800]
+                doc = Document(
+                    page_content=f"[Web] {title}\n{content_preview}",
+                    metadata={
+                        "date": state.get("target_date"),
+                        "item": "웹데이터",
+                        "url": r.get('url', '출처 없음'),
+                    }
+                )
+                web_docs.append(doc)
     except Exception as e:
         log.error(f"Web Searcher 오류: {e}")
 
@@ -1115,9 +1117,10 @@ def _clean_answer(text: str) -> str:
     final_text = re.sub(r'\n\s*\n', '\n\n', final_text)
 
     # 후처리 1: 잔존 역할 토큰 제거
-    for stop_token in ["<|assistant|>", "<|user|>", "<|prompt|>", "<|system|>", "<|im_start|>"]:
-        if stop_token in final_text:
-            final_text = final_text.split(stop_token)[0].strip()
+    if "<|assistant|>" in final_text:
+        final_text = final_text.split("<|assistant|>")[0].strip()
+    if "<|user|>" in final_text:
+        final_text = final_text.split("<|user|>")[0].strip()
 
     # 후처리 2: [상세 분석] 내부 인라인 참고문헌 줄 제거
     ref_sec_start = re.search(r'(^\[참고\s*문헌\]|^참고\s*문헌[:\s])', final_text, re.MULTILINE)
@@ -1167,6 +1170,17 @@ def answer_generator_node(state: AgentState):
             return {"answer": "힘드셨군요. 금융 시장 관련 데이터나 분석이 필요하시면 편하게 질문해 주세요!"}
         return {"answer": "저는 국제 금융 및 외환 시장 분석 전문 에이전트입니다. 금융 관련 질문을 도와드릴게요."}
     if topic == "general":
+        question = state.get("question", "")
+        # 금융 용어 개념 질문이면 간단히 설명
+        _term_map = {
+            "NDF": "NDF(Non-Deliverable Forward)는 실물 통화 교환 없이 차액만 정산하는 선물환 계약으로, 원화처럼 해외에서 거래가 제한된 통화의 환율 리스크를 헤지하는 데 사용됩니다.",
+            "CDS": "CDS(Credit Default Swap)는 채권 발행자의 부도 위험을 거래하는 파생상품입니다. CDS 프리미엄이 높을수록 해당 국가나 기업의 신용 위험이 크다고 봅니다.",
+            "ETF": "ETF(Exchange Traded Fund)는 주식처럼 거래소에서 거래되는 펀드로, 특정 지수나 자산을 추종합니다.",
+            "기준금리": "기준금리는 중앙은행이 설정하는 정책금리로, 시중 금리의 기준이 됩니다. 한국은 한국은행, 미국은 연방준비제도(Fed)가 결정합니다.",
+        }
+        for term, explanation in _term_map.items():
+            if term in question:
+                return {"answer": explanation}
         return {"answer": "안녕하세요! 국제 금융 지표, 환율 전망, 시장 분석에 대해 궁금한 점을 물어봐 주세요."}
 
     question = state["question"]
