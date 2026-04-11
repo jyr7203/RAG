@@ -158,19 +158,28 @@ def input_router_node(state: AgentState):
         "사야 해", "사야해", "투자해도 돼", "투자 해도 돼",
         "종목 추천", "어디 투자", "어디에 투자",
     ]
+    # 금융 범위 외 자산 — 개별 종목/암호화폐는 off_topic으로 처리
+    _out_of_scope = [
+        "비트코인", "이더리움", "리플", "도지코인", "코인", "암호화폐", "NFT",
+        "삼성전자", "카카오", "네이버", "현대차", "LG", "SK하이닉스",
+        "애플", "테슬라", "엔비디아", "구글", "아마존", "마이크로소프트",
+        "어떻게 생각해", "어떻게 생각하", "의견", "전망 어때", "어떨 것 같",
+    ]
     _finance_keywords = [
         "금리", "환율", "달러", "엔화", "유로", "주가", "NDF", "CDS",
         "금융", "채권", "주식", "원화", "증시", "코스피", "나스닥", "환", "이자",
         "관세", "트럼프", "연준", "기준금리", "국채", "펀드", "ETF", "선물",
+        "뉴욕", "증시", "시황", "지수", "SP500", "다우", "닛케이",
     ]
 
     has_general_kw  = any(k in question for k in _general_pre)
     has_finance_kw  = any(k in question for k in _finance_keywords)
     has_off_topic   = any(k in question for k in _off_topic_pre)
     has_invest_advice = any(k in question for k in _invest_advice)
+    has_out_of_scope = any(k in question for k in _out_of_scope)
 
-    # off_topic 사전 판단 — 감정/욕설 또는 투자 조언 요청이면 바로 off_topic 확정
-    if has_off_topic or has_invest_advice:
+    # off_topic 사전 판단 — 감정/욕설, 투자 조언, 범위 외 자산이면 바로 off_topic 확정
+    if has_off_topic or has_invest_advice or has_out_of_scope:
         print(f">> topic=off_topic | requires_search=False (사전 감정/욕설 판단)")
         return {
             "topic": "off_topic",
@@ -802,7 +811,15 @@ def web_searcher_node(state: AgentState):
     )
     try:
         results = web_tool.invoke({"query": search_query})
+        # Tavily 응답이 list가 아닌 경우 처리
+        if isinstance(results, str):
+            log.warning(f"[Web Searcher] Tavily 응답이 문자열 형태입니다. 건너뜁니다.")
+            results = []
         for r in results:
+            # r이 dict가 아닌 경우 처리
+            if not isinstance(r, dict):
+                log.warning(f"[Web Searcher] 예상치 못한 응답 형태: {type(r)}")
+                continue
             title   = r.get('title', '') or ''
             content = r.get('content', '') or ''
 
@@ -1098,10 +1115,9 @@ def _clean_answer(text: str) -> str:
     final_text = re.sub(r'\n\s*\n', '\n\n', final_text)
 
     # 후처리 1: 잔존 역할 토큰 제거
-    if "<|assistant|>" in final_text:
-        final_text = final_text.split("<|assistant|>")[0].strip()
-    if "<|user|>" in final_text:
-        final_text = final_text.split("<|user|>")[0].strip()
+    for stop_token in ["<|assistant|>", "<|user|>", "<|prompt|>", "<|system|>", "<|im_start|>"]:
+        if stop_token in final_text:
+            final_text = final_text.split(stop_token)[0].strip()
 
     # 후처리 2: [상세 분석] 내부 인라인 참고문헌 줄 제거
     ref_sec_start = re.search(r'(^\[참고\s*문헌\]|^참고\s*문헌[:\s])', final_text, re.MULTILINE)
