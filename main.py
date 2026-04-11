@@ -803,45 +803,47 @@ def web_searcher_node(state: AgentState):
         re.IGNORECASE
     )
     try:
-        results = web_tool.invoke({"query": search_query})
+        raw = web_tool.invoke({"query": search_query})
 
-        # langchain-tavily 0.2.x: 응답이 문자열인 경우 직접 Document로 변환
-        if isinstance(results, str):
-            if results.strip():
+        # dict 형태: {"results": [...]} — langchain-tavily 0.2.x 응답
+        if isinstance(raw, dict):
+            result_list = raw.get("results", [])
+        elif isinstance(raw, list):
+            result_list = raw
+        elif isinstance(raw, str):
+            result_list = []
+            if raw.strip():
                 doc = Document(
-                    page_content=f"[Web] {search_query}\n{results[:1600]}",
-                    metadata={
-                        "date": state.get("target_date"),
-                        "item": "웹데이터",
-                        "url": "Tavily Search",
-                    }
+                    page_content=f"[Web] {search_query}\n{raw[:1600]}",
+                    metadata={"date": state.get("target_date"), "item": "웹데이터", "url": "Tavily Search"},
                 )
                 web_docs.append(doc)
-                log.info(f"[Web Searcher] 문자열 응답 처리 완료 ({len(results)}자)")
+                log.info(f"[Web Searcher] 문자열 응답 처리 완료 ({len(raw)}자)")
         else:
-            # list of dict 형태 처리
-            for r in results:
-                if not isinstance(r, dict):
-                    log.warning(f"[Web Searcher] 예상치 못한 응답 형태: {type(r)}")
-                    continue
-                title   = r.get('title', '') or ''
-                content = r.get('content', '') or ''
+            result_list = []
+            log.warning(f"[Web Searcher] 알 수 없는 응답 형태: {type(raw)}")
 
-                # LaTeX 오염 콘텐츠는 저장 자체 패스
-                if _WEB_NOISE_RE.search(content):
-                    log.warning(f"[Web Sanitize] LaTeX 오염 문서 제외: {title[:60]}")
-                    continue
+        for r in result_list:
+            if not isinstance(r, dict):
+                continue
+            title   = r.get('title', '') or ''
+            content = r.get('content', '') or ''
 
-                content_preview = content[:800]
-                doc = Document(
-                    page_content=f"[Web] {title}\n{content_preview}",
-                    metadata={
-                        "date": state.get("target_date"),
-                        "item": "웹데이터",
-                        "url": r.get('url', '출처 없음'),
-                    }
-                )
-                web_docs.append(doc)
+            if _WEB_NOISE_RE.search(content):
+                log.warning(f"[Web Sanitize] LaTeX 오염 문서 제외: {title[:60]}")
+                continue
+
+            content_preview = content[:800]
+            doc = Document(
+                page_content=f"[Web] {title}\n{content_preview}",
+                metadata={
+                    "date": state.get("target_date"),
+                    "item": "웹데이터",
+                    "url": r.get('url', '출처 없음'),
+                }
+            )
+            web_docs.append(doc)
+        log.info(f"[Web Searcher] 총 {len(web_docs)}개 문서 수집 완료")
     except Exception as e:
         log.error(f"Web Searcher 오류: {e}")
 
