@@ -2,10 +2,16 @@ import os
 import torch
 import importlib.metadata as _meta
 from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
+from huggingface_hub import login
 from config import Config
 from logger_setting import get_logger
 
 log = get_logger("ModelLoader")
+
+_hf_token = os.getenv("HUGGINGFACE_TOKEN", "")
+if _hf_token:
+    login(token=_hf_token)
+    log.info("HuggingFace 로그인 완료")
 
 def _bnb_available() -> bool:
     """bitsandbytes가 실제로 설치돼 있는지 패키지 메타데이터로 확인합니다."""
