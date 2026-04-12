@@ -28,3 +28,4 @@ sentence-transformers
 accelerate
 peft==0.14.0
 bitsandbytes
+--no-deps torchvision
