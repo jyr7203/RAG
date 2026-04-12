@@ -91,7 +91,14 @@ class KananaModel:
                     low_cpu_mem_usage=True,
                     **load_kwargs
                 ).eval()
-                log.info("모델 로드 완료!")
+                
+                # GPU 정보 로그
+                if torch.cuda.is_available():
+                    gpu_name = torch.cuda.get_device_name(0)
+                    gpu_mem  = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+                    log.info(f"모델 로드 완료! GPU: {gpu_name} ({gpu_mem:.1f}GB)")
+                else:
+                    log.info("모델 로드 완료! (CPU 모드)")
             except Exception as e:
                 log.error(f"모델 로드 실패: {e}")
                 cls._model     = None
