@@ -163,8 +163,9 @@ def input_router_node(state: AgentState):
     ]
     _finance_keywords = [
         "금리", "환율", "달러", "엔화", "유로", "주가", "NDF", "CDS",
-        "금융", "채권", "주식", "원화", "증시", "코스피", "나스닥", "환", "이자",
+        "금융", "채권", "주식", "원화", "증시", "코스피", "나스닥", "이자",
         "관세", "트럼프", "연준", "기준금리", "국채", "펀드", "ETF", "선물",
+        "뉴욕", "시황", "SP500", "다우", "닛케이",
     ]
 
     has_general_kw  = any(k in question for k in _general_pre)
