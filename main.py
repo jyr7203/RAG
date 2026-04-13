@@ -788,8 +788,22 @@ def web_searcher_node(state: AgentState):
     else:
         web_tool = _TavilyTool(k=3, search_depth="advanced")
     
-    query_parts = [state.get("target_date", ""), state.get("category", ""), state.get("question", "")]
+    # 오늘/어제 최신 데이터 요청 시 구체적 지수명 포함
+    question_text = state.get("question", "")
+    query_parts = [state.get("target_date", ""), state.get("category", ""), question_text]
     search_query = " ".join([p for p in query_parts if p]).strip()
+
+    # 나스닥/코스피 등 지수명이 있으면 검색어에 추가
+    _index_keywords = {
+        "나스닥": "나스닥 NASDAQ",
+        "코스피": "코스피 KOSPI",
+        "다우": "다우존스 Dow Jones",
+        "SP500": "S&P500",
+        "닛케이": "닛케이 Nikkei",
+    }
+    for k, v in _index_keywords.items():
+        if k in question_text and v not in search_query:
+            search_query = search_query.replace(k, v)
     
     log.info(f">> Web Searching: {search_query}")
 
@@ -1154,6 +1168,11 @@ def _clean_answer(text: str) -> str:
     # 후처리 4: "Document N" / "문서 N" → "[N]" 통일
     final_text = re.sub(r'\[?[Dd]ocument\s*#?\s*(\d+)\]?', r'[\1]', final_text)
     final_text = re.sub(r'\[?문서\s*#?\s*(\d+)\]?',         r'[\1]', final_text)
+
+    # 후처리 5: 본문 없이 [참고 문헌]만 남은 경우 원본 텍스트 반환
+    body_check = re.sub(r'(^|\n)\[참고\s*문헌\][\s\S]*', '', final_text, flags=re.MULTILINE).strip()
+    if not body_check:
+        return text.strip()
 
     return final_text
 
