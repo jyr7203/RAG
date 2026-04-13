@@ -3,10 +3,26 @@
 # ============================================================
 import os
 import sys
+import subprocess
 from config import Config
 from logger_setting import get_logger
 
 log = get_logger("Setup")
+
+def remove_conflicting_packages() -> bool:
+    """충돌 패키지 확인 후 문제 발생 시 제거"""
+    try:
+        import torchcodec  # 충돌 테스트
+        return True
+    except Exception:
+        _conflict_packages = ["torchcodec", "torchvision"]
+        for pkg in _conflict_packages:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "uninstall", pkg, "-y"],
+                capture_output=True
+            )
+        log.info("✅ 충돌 패키지 제거 완료")
+    return True
 
 
 def check_env() -> bool:
@@ -78,6 +94,9 @@ def run_setup() -> bool:
     log.info("Kanana Agent 사전 준비 시작")
     log.info("=" * 50)
 
+    # 충돌 패키지 먼저 제거
+    remove_conflicting_packages()
+
     checks = [
         check_env,
         check_csv,
@@ -99,4 +118,3 @@ def run_setup() -> bool:
 if __name__ == "__main__":
     success = run_setup()
     sys.exit(0 if success else 1)
-
