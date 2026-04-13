@@ -118,7 +118,7 @@ def ask_kanana(prompt: str, max_tokens: int = 1024, temp: float = 0.1) -> str:
                 plain_prompt = f"<|user|>\n{prompt}"
                 result = decoded.replace(plain_prompt, "") if plain_prompt in decoded else decoded
 
-            # result 내에 잔존하는 모든 역할 토큰 후처리로 제거.
+            # result 내에 잔존하는 모든 역할 토큰 후처리로 제거
             if "<|user|>" in result:
                 result = result.split("<|user|>")[0]
 
@@ -148,6 +148,7 @@ def input_router_node(state: AgentState):
         "소개", "기능", "사용법", "넌 뭐", "넌 어떤", "당신은 누구", "당신은 뭐",
         "가 뭐야", "이 뭐야", "란 뭐야", "는 뭐야", "가 뭐지", "이 뭐지",
         "란 무엇", "는 무엇", "뭐야", "뭐지", "이란", "이란 무엇", "무엇인가",
+        "어떤 질문", "무슨 질문", "잘 답변", "응답 잘"
     ]
     # off_topic 사전 판단 키워드 — 감정 표현/욕설 또는 투자 조언 요청
     _off_topic_pre = [
@@ -387,10 +388,10 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
     today_obj = datetime.strptime(today_str, "%Y-%m-%d")
 
     # ── 연(年) 단위 범위 감지 ──────────────────────────────────────────────────
-    # 절대 연도: 4자리(2024년), 2자리 약칭(25년→2025) 모두 findall로 전체 추출.
-    # "25년이랑 26년 비교" 두 연도 비교 - re.findall 여러 연도를 모두 추출해 min~max 범위 처리
+    # 절대 연도: 4자리(2024년), 2자리 약칭(25년) findall로 전체 추출
+    # 두 연도 비교 - re.findall 여러 연도를 모두 추출해 min~max 범위 처리
     _abs_year_list  = [int(y) for y in re.findall(r"\b(20\d{2}|19\d{2})\s*년", question)]
-    # 2자리 약칭: "25년"→2025, 단 이미 4자리로 파싱된 것과 중복 제거
+    # 2자리 약칭: "25년"→2025 (이미 4자리로 파싱된 것과 중복 제거)
     _abbr_year_list = [2000 + int(y) for y in re.findall(r"(?<!\d)([2-9]\d)\s*년", question)
                        if (2000 + int(y)) not in _abs_year_list]
     _all_abs_years  = sorted(set(_abs_year_list + _abbr_year_list))
@@ -500,8 +501,7 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
         end_date_str = target_date
     else:
         # ── 연도 없는 복수 월 비교: "3월, 4월 엔화", "3월이랑 4월 금리" 등 ──────
-        # 절대/상대 연도가 없고, 다른 기간 조건도 없을 때 월 키워드 2개 이상이면
-        # 올해 해당 월 범위(N월 1일 ~ M월 말일)로 처리
+        # 절대/상대 연도, 다른 기간 조건 없지만 월 키워드 2개 이상 -> 올해 해당 월 범위 처리
         import calendar as _cal
         _month_map2 = {"1월":1,"2월":2,"3월":3,"4월":4,"5월":5,"6월":6,
                        "7월":7,"8월":8,"9월":9,"10월":10,"11월":11,"12월":12}
@@ -536,7 +536,7 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
         "category":        category,
     }
 
-# vector_db는 서버 시작 시 startup()에서 초기화됩니다.
+# vector_db는 서버 시작 시 startup()에서 초기화
 vector_db = None
 
 def ensure_date_int_metadata():
@@ -657,8 +657,7 @@ def _build_date_filter(start_date_int: int, end_date_int: int, target_item: str 
                 ]
             })
         else:
-            # 범위 날짜: Chroma는 숫자 필드에만 $gte/$lte 지원 → date_int 필드만 사용
-            # 문자열 $gte/$lte는 Chroma에서 "Expected int or float" 오류 발생하므로 완전 제거
+            # 문자열 $gte/$lte는 Chroma에서 오류 발생 -> 제거
             filter_list.append({
                 "$and": [
                     {"date_int": {"$gte": start_date_int}},
@@ -712,7 +711,7 @@ def _search_with_fallback(query: str, start_date_int: int, end_date_int: int,
     # ── 3차 시도: 필터 없이 + 날짜 문자열 후처리 ──
     # date_int 마이그레이션 전 또는 범위가 넓을 때 활용
     try:
-        # 범위가 넓을수록 더 많은 후보를 끌어와야 하므로 k를 동적으로 확대
+        # 범위가 넓을수록 k 동적 확대
         k3_mult = 6 if (start_str and end_str and start_str != end_str) else 3
         docs3 = vector_db.similarity_search(query, k=k * k3_mult)
         if docs3 and start_str and end_str:
@@ -788,22 +787,8 @@ def web_searcher_node(state: AgentState):
     else:
         web_tool = _TavilyTool(k=3, search_depth="advanced")
     
-    # 오늘/어제 최신 데이터 요청 시 구체적 지수명 포함
-    question_text = state.get("question", "")
-    query_parts = [state.get("target_date", ""), state.get("category", ""), question_text]
+    query_parts = [state.get("target_date", ""), state.get("category", ""), state.get("question", "")]
     search_query = " ".join([p for p in query_parts if p]).strip()
-
-    # 나스닥/코스피 등 지수명이 있으면 검색어에 추가
-    _index_keywords = {
-        "나스닥": "나스닥 NASDAQ",
-        "코스피": "코스피 KOSPI",
-        "다우": "다우존스 Dow Jones",
-        "SP500": "S&P500",
-        "닛케이": "닛케이 Nikkei",
-    }
-    for k, v in _index_keywords.items():
-        if k in question_text and v not in search_query:
-            search_query = search_query.replace(k, v)
     
     log.info(f">> Web Searching: {search_query}")
 
@@ -819,7 +804,7 @@ def web_searcher_node(state: AgentState):
     try:
         raw = web_tool.invoke({"query": search_query})
 
-        # dict 형태: {"results": [...]} — langchain-tavily 0.2.x 응답
+        # dict 형태: {"results": [...]}
         if isinstance(raw, dict):
             result_list = raw.get("results", [])
         elif isinstance(raw, list):
@@ -879,7 +864,7 @@ def context_filter_node(state: AgentState):
         print(">> 검색된 문서 없음.")
         return {"retrieved_docs": [], "context_score": "no"}
 
-    # 문서가 1개이거나, 이미 웹 검색을 다녀왔다면, 2~3개 문서도 LLM 필터링 생략 -> 데이터 손실 방지
+    # 문서가 1개이거나, 웹 검색한 경우 2~3개 문서도 LLM 필터링 생략 (데이터 손실 방지)
     if len(documents) <= 3 or loop_count >= 1:
         print(f">> [Skip] 검색된 문서가 {len(documents)}개이거나 웹 검색 데이터입니다. 안전을 위해 필터링을 통과시킵니다.")
         return {"retrieved_docs": documents, "context_score": "yes"}
@@ -1028,7 +1013,7 @@ def context_evaluator_node(state: AgentState):
     log.info(f"결과: {'충분' if is_enough else '부족'} | 판정: {first_token!r}")
 
     if not is_enough and (len(docs) >= 3 or loop_count >= 1):
-        log.warning("⚠️ 정보 불충분 판정이나 루프/문서 수 조건으로 답변 단계 진입.")
+        log.warning("정보 불충분 판정이나 루프/문서 수 조건으로 답변 단계 진입.")
         is_enough = True
 
     return {
@@ -1095,13 +1080,9 @@ def _clean_answer(text: str) -> str:
         if _contam_re.search(stripped):
             break
 
-        # 면책 주석 3줄 연속 차단
-        if stripped.startswith("※") or stripped.startswith("(※"):
-            disclaimer_count += 1
-            if disclaimer_count >= 3:
-                break
-        else:
-            disclaimer_count = 0
+        # 면책 주석 차단 (※로 시작하는 줄 전부)
+        if stripped.startswith("※") or stripped.startswith("(※") or stripped.startswith("* ※"):
+            continue
 
         # [참고 문헌] 섹션 줄 수 제한
         if re.search(r"^\[참고\s*문헌\]|^참고\s*문헌[:\s]", stripped):
@@ -1152,7 +1133,13 @@ def _clean_answer(text: str) -> str:
     if len(ref_matches) >= 2:
         final_text = final_text[:ref_matches[1].start()].strip()
 
-    # 후처리 3-a: 참고문헌 섹션 내 플레이스홀더 줄 제거 -> LLM이 프롬프트 예시를 그대로 복사하는 패턴 방어
+    # 후처리 3-a: 중복 [요약] 블록 제거 (두 번째 [요약] 이후 제거)
+    summary_pattern = re.compile(r'(^\[요약\])', re.MULTILINE)
+    summary_matches = list(summary_pattern.finditer(final_text))
+    if len(summary_matches) >= 2:
+        final_text = final_text[:summary_matches[1].start()].strip()
+
+    # 후처리 3-b: 참고문헌 섹션 내 플레이스홀더 줄 제거
     _placeholder_re = re.compile(
         r'^\s*(\[번호\]|\[숫자\])\s.*$'           # [번호] 날짜 | 제목
         r'|^\s*\[\d+\]\s*날짜\s*\|.*$'            # [1] 날짜 | 제목
@@ -1168,11 +1155,6 @@ def _clean_answer(text: str) -> str:
     # 후처리 4: "Document N" / "문서 N" → "[N]" 통일
     final_text = re.sub(r'\[?[Dd]ocument\s*#?\s*(\d+)\]?', r'[\1]', final_text)
     final_text = re.sub(r'\[?문서\s*#?\s*(\d+)\]?',         r'[\1]', final_text)
-
-    # 후처리 5: 본문 없이 [참고 문헌]만 남은 경우 원본 텍스트 반환
-    body_check = re.sub(r'(^|\n)\[참고\s*문헌\][\s\S]*', '', final_text, flags=re.MULTILINE).strip()
-    if not body_check:
-        return text.strip()
 
     return final_text
 
@@ -1192,7 +1174,7 @@ def answer_generator_node(state: AgentState):
         return {"answer": "저는 국제 금융 및 외환 시장 분석 전문 에이전트입니다. 금융 관련 질문을 도와드릴게요."}
     if topic == "general":
         question = state.get("question", "")
-        # 금융 용어 개념 질문이면 간단히 설명
+        # 금융 용어 개념 질문: 간단히 설명
         _term_map = {
             "NDF": "NDF(Non-Deliverable Forward)는 실물 통화 교환 없이 차액만 정산하는 선물환 계약으로, 원화처럼 해외에서 거래가 제한된 통화의 환율 리스크를 헤지하는 데 사용됩니다.",
             "CDS": "CDS(Credit Default Swap)는 채권 발행자의 부도 위험을 거래하는 파생상품입니다. CDS 프리미엄이 높을수록 해당 국가나 기업의 신용 위험이 크다고 봅니다.",
@@ -1271,7 +1253,7 @@ def answer_generator_node(state: AgentState):
 
     print(f">> {len(context_docs)}개 문서를 바탕으로 답변 생성 중...")
 
-    # 범위 쿼리(장기 비교)는 토큰을 더 허용, 단일 날짜는 1200으로 제한
+    # 범위 쿼리(장기 비교)는 토큰 더 허용, 단일 날짜는 1200으로 제한
     gen_max_tokens = 1500 if is_range_query else 1200
     raw_answer = ask_kanana(prompt, max_tokens=gen_max_tokens, temp=0.1)
 
@@ -1324,7 +1306,7 @@ def hallucination_grader_node(state: AgentState):
     web_doc_count = sum(1 for d in documents if d.metadata.get("item") == "웹데이터")
     is_mostly_web = web_doc_count >= len(documents) // 2
 
-    # "데이터 없음" 스킵은 순수 DB 답변에만 적용.
+    # "데이터 없음" 스킵은 순수 DB 답변에만 적용
     _no_data_markers = ["찾을 수 없습니다", "데이터가 없", "정보가 없", "관련 정보를 찾"]
     answer_str = str(answer)
     if not is_mostly_web and any(m in answer_str for m in _no_data_markers):
