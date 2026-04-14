@@ -1347,14 +1347,14 @@ def hallucination_grader_node(state: AgentState):
     if not is_mostly_web and any(m in answer_str for m in _no_data_markers):
         print(">> [Skip] 데이터 없음 응답 → 환각 검사 생략, PASS 처리")
         return {"hallucination_score": "yes", "analysis_note": "데이터 없음 응답 → PASS"}
-    # 웹 기반 답변이 "데이터 없음"만으로 구성된 경우(실제로 아무 정보도 없는 경우)도 스킵 허용
+    # 웹 기반 답변이 "데이터 없음"만으로 구성된 경우 스킵 허용
     if is_mostly_web and all(m in answer_str for m in ["찾을 수 없습니다"]) and len(answer_str.strip()) < 100:
         print(">> [Skip] 웹 기반 데이터 없음 단독 응답 → PASS 처리")
         return {"hallucination_score": "yes", "analysis_note": "데이터 없음 응답 → PASS"}
 
     if is_mostly_web:
         # 웹 검색 기반 답변은 구조 검증만 수행
-        prompt = f"""아래 [답변]이 금융 분야에 관한 내용인지, 그리고 금융과 전혀 무관한 내용(예: 바탕화면 정리, 요리법 등)이 포함되어 있는지 확인하세요.
+        prompt = f"""아래 [답변]이 금융 분야에 관한 내용인지, 그리고 금융과 전혀 무관한 내용이 포함되어 있는지 확인하세요.
 
 [답변]
 {str(answer)[:600]}
@@ -1605,3 +1605,4 @@ def ask(req: AskRequest):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:api", host="0.0.0.0", port=Config.APP_PORT, reload=False)
+    
