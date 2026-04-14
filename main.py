@@ -40,7 +40,7 @@ from logger_setting import get_logger
 
 log = get_logger("MainAgent")
 
-# ── 임베딩 모델 싱글턴 (매 노드마다 재로드 방지) ──────────────────────────────
+# ── 임베딩 모델 싱글턴 ──────────────────────────────
 _embeddings: HuggingFaceEmbeddings | None = None
 
 def get_embeddings() -> HuggingFaceEmbeddings:
@@ -207,7 +207,7 @@ TOPIC: finance 또는 general 또는 off_topic
 SEARCH: True (finance인 경우만) 또는 False
 REASON: 판단 근거 한 줄"""
 
-    # 분류 판정만 하므로 max_tokens 최소화, temp=0.0으로 결정적 출력
+    # 분류 판정 - max_tokens 최소화, temp=0.0으로 결정적 출력
     res = ask_kanana(prompt, max_tokens=60, temp=0.0)
     res_lower = res.lower()
 
@@ -418,7 +418,7 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
 
     if len(_all_abs_years) >= 2:
         # ── 복수 절대 연도 비교: "25년이랑 26년", "2024년과 2025년" 등 ──────────
-        # 가장 이른 연도 1월 1일 ~ 가장 늦은 연도 12월 31일로 범위 설정
+        # 가장 이른 연초 ~ 가장 늦은 연말 범위 설정
         start_date_str = f"{min(_all_abs_years)}-01-01"
         end_date_str   = f"{max(_all_abs_years)}-12-31"
         target_date    = start_date_str
@@ -565,7 +565,6 @@ def ensure_date_int_metadata():
                     continue
         
         if ids_to_update:
-            # Chroma LangChain 래퍼는 .update() 미지원 → _collection 직접 접근
             BATCH = 500
             for i in range(0, len(ids_to_update), BATCH):
                 vector_db._collection.update(
@@ -1165,7 +1164,7 @@ def answer_generator_node(state: AgentState):
     topic = state.get("topic")
 
     if topic == "off_topic":
-        # 감정 표현 + 금융 키워드가 섞인 경우 공감하며 금융 주제로 안내
+        # 감정 표현 + 금융 키워드 혼합 -> 공감하며 금융 주제로 안내
         _finance_kw_in_q = any(k in state.get("question","") for k in [
             "금리","환율","달러","주가","증시","채권","금융","코스피","나스닥"
         ])
@@ -1174,7 +1173,7 @@ def answer_generator_node(state: AgentState):
         return {"answer": "저는 국제 금융 및 외환 시장 분석 전문 에이전트입니다. 금융 관련 질문을 도와드릴게요."}
     if topic == "general":
         question = state.get("question", "")
-        # 금융 용어 개념 질문: 간단히 설명
+        # 금융 용어 개념 질문
         _term_map = {
             "NDF": "NDF(Non-Deliverable Forward)는 실물 통화 교환 없이 차액만 정산하는 선물환 계약으로, 원화처럼 해외에서 거래가 제한된 통화의 환율 리스크를 헤지하는 데 사용됩니다.",
             "CDS": "CDS(Credit Default Swap)는 채권 발행자의 부도 위험을 거래하는 파생상품입니다. CDS 프리미엄이 높을수록 해당 국가나 기업의 신용 위험이 크다고 봅니다.",
@@ -1216,7 +1215,7 @@ def answer_generator_node(state: AgentState):
             f"내용: {content_preview}\n\n"
         )
 
-    # 프롬프트 제약조건 초강화, 범위 쿼리일 경우 비교/추이 분석 요청
+    # 범위 쿼리일 경우 비교/추이 분석 요청
     range_hint = ""
     if is_range_query:
         start_str_hint = str(start_date_int)
@@ -1312,14 +1311,14 @@ def hallucination_grader_node(state: AgentState):
     if not is_mostly_web and any(m in answer_str for m in _no_data_markers):
         print(">> [Skip] 데이터 없음 응답 → 환각 검사 생략, PASS 처리")
         return {"hallucination_score": "yes", "analysis_note": "데이터 없음 응답 → PASS"}
-    # 웹 기반 답변이 "데이터 없음"만으로 구성된 경우(실제로 아무 정보도 없는 경우)도 스킵 허용
+    # 웹 기반 답변이 "데이터 없음"만으로 구성된 경우 스킵 허용
     if is_mostly_web and all(m in answer_str for m in ["찾을 수 없습니다"]) and len(answer_str.strip()) < 100:
         print(">> [Skip] 웹 기반 데이터 없음 단독 응답 → PASS 처리")
         return {"hallucination_score": "yes", "analysis_note": "데이터 없음 응답 → PASS"}
 
     if is_mostly_web:
         # 웹 검색 기반 답변은 구조 검증만 수행
-        prompt = f"""아래 [답변]이 금융 분야에 관한 내용인지, 그리고 금융과 전혀 무관한 내용(예: 바탕화면 정리, 요리법 등)이 포함되어 있는지 확인하세요.
+        prompt = f"""아래 [답변]이 금융 분야에 관한 내용인지, 그리고 금융과 전혀 무관한 내용이 포함되어 있는지 확인하세요.
 
 [답변]
 {str(answer)[:600]}
@@ -1494,7 +1493,7 @@ def build_graph():
         {"Enough": "answer_generator", "Not_Enough": "web_searcher"},
     )
 
-    # [F] 환각 체크 루프 (answer_regenerator 독립 노드로 분리)
+    # [F] 환각 체크 루프
     workflow.add_edge("answer_generator", "hallucination_grader")
     workflow.add_conditional_edges(
         "hallucination_grader", route_hallucination,
