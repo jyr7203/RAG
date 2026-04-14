@@ -1037,54 +1037,48 @@ def route_from_evaluator(state: AgentState):
 
 def _clean_answer(text: str) -> str:
     """
-    1. 무한 루프, 깨진 특수기호 도배, 동일 문장 반복 발생 시 즉시 절단
-    2. ※ 면책 주석 반복 줄 제거
-    3. LaTeX / HTML / 역할 태그 / 학술 오염 텍스트 차단
-    4. [참고 문헌] 섹션 이후 최대 6줄로 제한
+    후처리 통합 버전: LaTeX/HTML 오염 차단, 면책 주석 제거, 중복 블록 제거,
+    플레이스홀더 제거, 미래 날짜 참고문헌 제거, 미인용 참고문헌 제거
     """
+    from datetime import date as _date_today
+
     _LATEX_MARKERS = [
         r"\\section\{", r"\\subsection\{", r"\\begin\{",
-        r"\\cite\{",    r"\\label\{",      r"\\ref\{",
-        r"\\textbf\{",  r"\\emph\{",
+        r"\\cite\{", r"\\label\{", r"\\ref\{",
+        r"\\textbf\{", r"\\emph\{",
         r"\\\(", r"\\\[",
         r"\\mathrm\{", r"\\frac\{", r"\\sqrt\{",
     ]
     _HTML_MARKERS = [
         r"<h[1-6][\s>]", r"</h[1-6]>",
-        r"<p[\s>]",       r"</p>",
-        r"<div[\s>]",     r"</div>",
-        r"<table[\s>]",   r"<tr[\s>]", r"<td[\s>]",
-        r"<ul[\s>]",      r"<ol[\s>]", r"<li[\s>]",
+        r"<p[\s>]", r"</p>",
+        r"<div[\s>]", r"</div>",
+        r"<table[\s>]", r"<tr[\s>]", r"<td[\s>]",
+        r"<ul[\s>]", r"<ol[\s>]", r"<li[\s>]",
         r"</assistant>", r"<assistant>",
-        r"<hex>",        r"</hex>",
+        r"<hex>", r"</hex>",
         r"<\|assistant\|>", r"<\|user\|>",
+        r"<\|prompt\|>", r"<\|system\|>",
     ]
     _contam_re = re.compile("|".join(_LATEX_MARKERS + _HTML_MARKERS), re.IGNORECASE)
 
     lines = text.split("\n")
     cleaned = []
     seen_lines = set()
-    disclaimer_count = 0
-    ref_section_line_count = 0
     in_ref_section = False
+    ref_section_line_count = 0
     _REF_MAX_LINES = 6
 
     for line in lines:
         stripped = line.strip()
 
-        # 비정상 특수 기호 도배 방지
         if "]]]" in stripped or "[[[" in stripped or re.search(r"={5,}", stripped):
             break
-
-        # LaTeX / HTML / 역할 태그 오염 방지
         if _contam_re.search(stripped):
             break
-
-        # 면책 주석 차단 (※로 시작하는 줄 전부)
         if stripped.startswith("※") or stripped.startswith("(※") or stripped.startswith("* ※"):
             continue
 
-        # [참고 문헌] 섹션 줄 수 제한
         if re.search(r"^\[참고\s*문헌\]|^참고\s*문헌[:\s]", stripped):
             in_ref_section = True
             ref_section_line_count = 0
@@ -1097,10 +1091,8 @@ def _clean_answer(text: str) -> str:
                 cleaned.append(stripped[:120])
                 continue
 
-        # 반복 문장 감지 (참고문헌 섹션 제외)
         if not in_ref_section and stripped and len(stripped) >= 30:
-            _has_numeric = bool(re.search(r'\d', stripped))
-            if not _has_numeric:
+            if not re.search(r'\d', stripped):
                 pure_text = re.sub(r'^\[[^\]]+\]\s*:\s*', '', stripped)
                 pure_text = re.sub(r'[^가-힣a-zA-Z0-9\s]', '', pure_text).strip()
                 if pure_text and pure_text in seen_lines:
@@ -1113,13 +1105,12 @@ def _clean_answer(text: str) -> str:
     final_text = "\n".join(cleaned).strip()
     final_text = re.sub(r'\n\s*\n', '\n\n', final_text)
 
-    # 후처리 1: 잔존 역할 토큰 제거
-    if "<|assistant|>" in final_text:
-        final_text = final_text.split("<|assistant|>")[0].strip()
-    if "<|user|>" in final_text:
-        final_text = final_text.split("<|user|>")[0].strip()
+    # 역할 토큰 제거
+    for stop_token in ["<|assistant|>", "<|user|>", "<|prompt|>", "<|system|>"]:
+        if stop_token in final_text:
+            final_text = final_text.split(stop_token)[0].strip()
 
-    # 후처리 2: [상세 분석] 내부 인라인 참고문헌 줄 제거
+    # 상세 분석 내부 인라인 참고문헌 제거
     ref_sec_start = re.search(r'(^\[참고\s*문헌\]|^참고\s*문헌[:\s])', final_text, re.MULTILINE)
     ref_sec_pos = ref_sec_start.start() if ref_sec_start else len(final_text)
     body = final_text[:ref_sec_pos]
@@ -1127,37 +1118,79 @@ def _clean_answer(text: str) -> str:
     body = re.sub(r'^\s*\[\d+\]\s+\d{4}-\d{2}-\d{2}[^\n]*\n?', '', body, flags=re.MULTILINE)
     final_text = body + tail
 
-    # 후처리 3: 중복 [참고 문헌] 블록 제거
-    ref_pattern = re.compile(r'(^\[참고\s*문헌\]|^참고\s*문헌[:\s])', re.MULTILINE)
-    ref_matches = list(ref_pattern.finditer(final_text))
+    # 중복 [참고 문헌] 블록 제거
+    ref_matches = list(re.compile(r'(^\[참고\s*문헌\]|^참고\s*문헌[:\s])', re.MULTILINE).finditer(final_text))
     if len(ref_matches) >= 2:
         final_text = final_text[:ref_matches[1].start()].strip()
 
-    # 후처리 3-a: 중복 [요약] 블록 제거 (두 번째 [요약] 이후 제거)
-    summary_pattern = re.compile(r'(^\[요약\])', re.MULTILINE)
-    summary_matches = list(summary_pattern.finditer(final_text))
+    # 중복 [요약] 블록 제거
+    summary_matches = list(re.compile(r'(^\[요약\])', re.MULTILINE).finditer(final_text))
     if len(summary_matches) >= 2:
         final_text = final_text[:summary_matches[1].start()].strip()
 
-    # 후처리 3-b: 참고문헌 섹션 내 플레이스홀더 줄 제거
+    # 플레이스홀더 제거
     _placeholder_re = re.compile(
-        r'^\s*(\[번호\]|\[숫자\])\s.*$'           # [번호] 날짜 | 제목
-        r'|^\s*\[\d+\]\s*날짜\s*\|.*$'            # [1] 날짜 | 제목
-        r'|^\s*\[\d+\]\s*날짜\s*$'               # [1] 날짜
-        r'|^\s*날짜\s*\|\s*제목.*$'               # 날짜 | 제목
-        r'|^\s*\(최대\s*\d+개.*종료\).*$'         # (최대 5개, 이후 즉시 종료)
-        r'|^\s*\[참고\s*문헌\]\.\.\.$'
-        r'|^\s*\[주석.*면책.*반복.*없음\].*$'
-        r'|^\s*\[주석,.*\].*$',            # [참고 문헌]...
+        r'^\s*(\[번호\]|\[숫자\])\s.*$'
+        r'|^\s*\[\d+\]\s*날짜\s*\|.*$'
+        r'|^\s*\[\d+\]\s*날짜\s*$'
+        r'|^\s*날짜\s*\|\s*제목.*$'
+        r'|^\s*\(최대\s*\d+개.*\).*$'
+        r'|^\s*\[참고\s*문헌\]\.\.\.$$'
+        r'|^\s*\[\d+\]\s*.*(기타\s*참고\s*자료|선택\s*사항).*$'
+        r'|^\s*\[\d+\]\s*.*없음\(최대.*$'
+        r'|^\s*\[\d+\]\s*.*—>.*없음.*$'
+        r'|참고\s*자료\(\[번호\]\s*날짜\s*\|\s*제목\).*$'
+        r'|^\s*\(총\s*\d+개\s*참고\s*문헌.*\).*$'
+        r'|^\s*\[주석.*\].*$'
+        r'|^\s*\[수정\s*내역\].*$'
+        r'|^\s*\[교정\s*피드백\].*$',
         re.MULTILINE
     )
     final_text = _placeholder_re.sub('', final_text)
-    final_text = re.sub(r'\n\s*\n', '\n\n', final_text).strip()
 
-    # 후처리 4: "Document N" / "문서 N" → "[N]" 통일
+    # Document N / 문서 N → [N] 통일
     final_text = re.sub(r'\[?[Dd]ocument\s*#?\s*(\d+)\]?', r'[\1]', final_text)
-    final_text = re.sub(r'\[?문서\s*#?\s*(\d+)\]?',         r'[\1]', final_text)
+    final_text = re.sub(r'\[?문서\s*#?\s*(\d+)\]?', r'[\1]', final_text)
 
+    # 미래 날짜 참고문헌 제거 + 구분선 제거
+    today_str = _date_today.today().strftime("%Y-%m-%d")
+    ref_sec_match = re.search(r'(^\[참고\s*문헌\].*$)', final_text, re.MULTILINE)
+    if ref_sec_match:
+        body = final_text[:ref_sec_match.start()]
+        ref_section = final_text[ref_sec_match.start():]
+        filtered = []
+        for line in ref_section.split("\n"):
+            date_match = re.search(r'(\d{4}-\d{2}-\d{2})', line)
+            if date_match and re.match(r'^\s*\[\d+\]', line) and date_match.group(1) > today_str:
+                continue
+            if line.strip() == "---":
+                continue
+            filtered.append(line)
+        final_text = body + "\n".join(filtered)
+
+    # 미인용 참고문헌 제거
+    ref_sec_match2 = re.search(r'(^\[참고\s*문헌\].*$)', final_text, re.MULTILINE)
+    if ref_sec_match2:
+        body = final_text[:ref_sec_match2.start()]
+        ref_section = final_text[ref_sec_match2.start():]
+        cited = set(re.findall(r'\[(\d+)\]', body))
+        filtered = []
+        for line in ref_section.split("\n"):
+            ref_num = re.match(r'^\s*\[(\d+)\]', line)
+            if ref_num and ref_num.group(1) not in cited:
+                continue
+            filtered.append(line)
+        final_text = body + "\n".join(filtered)
+
+    # 본문 없이 참고문헌만 남은 경우 원본 반환
+    body_check = re.sub(r'(^|\n)\[참고\s*문헌\][\s\S]*', '', final_text, flags=re.MULTILINE).strip()
+    if not body_check:
+        return text.strip()
+
+    # 빈 참고문헌 섹션 제거
+    final_text = re.sub(r'\n\[참고\s*문헌\][:\s]*\n(\s*\n)*$', '', final_text, flags=re.MULTILINE).strip()
+
+    final_text = re.sub(r'\n\s*\n', '\n\n', final_text).strip()
     return final_text
 
 
@@ -1239,9 +1272,6 @@ def answer_generator_node(state: AgentState):
 3. 문서에 없는 수치나 원인을 배경지식으로 지어내지 마세요.
 4. [참고 문헌] 섹션은 반드시 "[번호] 날짜 | 제목" 형식으로 한 줄씩, 최대 5개만 작성하고 즉시 멈추세요.
 5. 답변이 끝나면 즉시 멈추세요. 주석, 면책 문구, 반복 설명을 절대 붙이지 마세요.
-6. [참고 문헌]의 번호([1], [2] 등)는 반드시 [상세 분석]에서 인용한 번호와 일치해야 합니다.
-7. 오늘 날짜({target_date}) 이후의 미래 날짜는 절대 참고 문헌에 포함하지 마세요.
-8. [웹], ([3]), ([웹]) 같은 내부 참조 표기를 답변에 그대로 출력하지 마세요.
 
 [답변 구조]
 [요약]: 핵심 결론 2~3문장
@@ -1249,7 +1279,7 @@ def answer_generator_node(state: AgentState):
 [참고 문헌]:
 [1] 날짜 | 제목
 [2] 날짜 | 제목
-(최대 5개)
+(최대 5개, 이후 즉시 종료)
 
 질문: {question}
 
