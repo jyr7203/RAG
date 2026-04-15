@@ -152,7 +152,7 @@ def input_router_node(state: AgentState):
     ]
     # off_topic 사전 판단 키워드 — 감정 표현/욕설 또는 투자 조언 요청
     _off_topic_pre = [
-        "짜증", "열받", "빡쳐", "ㅅㅂ", "ㅆㅂ", "씨발", "개새", "존나",
+        "짜증", "열받", "빡쳐","존나",
         "욕설", "꺼져", "닥쳐", "미치겠", "빡친", "화난다",
     ]
     # 투자 조언/추천 요청 — finance 키워드가 있어도 off_topic으로 처리
@@ -163,7 +163,7 @@ def input_router_node(state: AgentState):
     ]
     _finance_keywords = [
         "금리", "환율", "달러", "엔화", "유로", "주가", "NDF", "CDS",
-        "금융", "채권", "주식", "원화", "증시", "코스피", "나스닥", "환", "이자",
+        "금융", "채권", "주식", "원화", "증시", "코스피", "나스닥", "이자",
         "관세", "트럼프", "연준", "기준금리", "국채", "펀드", "ETF", "선물",
     ]
 
@@ -172,7 +172,7 @@ def input_router_node(state: AgentState):
     has_off_topic   = any(k in question for k in _off_topic_pre)
     has_invest_advice = any(k in question for k in _invest_advice)
 
-    # off_topic 사전 판단 — 감정/욕설 또는 투자 조언 요청이면 바로 off_topic 확정
+    # off_topic 사전 판단 — 감정/욕설 또는 투자 조언 요청은 off_topic
     if has_off_topic or has_invest_advice:
         print(f">> topic=off_topic | requires_search=False (사전 감정/욕설 판단)")
         return {
@@ -288,7 +288,7 @@ def multi_query_generator_node(state: AgentState):
 
     rel_date = _extract_relative_date(question, now)
     date_hint = (
-        f"\n[날짜 힌트] 질문의 날짜 표현 계산 결과: {rel_date} → DATE에 이 값을 사용하세요."
+        f"\n질문의 날짜 표현 계산 결과: {rel_date} → DATE에 이 값을 사용하세요."
         if rel_date else ""
     )
 
@@ -298,7 +298,7 @@ def multi_query_generator_node(state: AgentState):
 [엄격한 규칙]
 1. 사용자가 언급한 국가(미국, 한국, 일본 등)나 지표(금리, 환율 등)를 절대 임의로 바꾸지 마세요.
 2. '최근', '어때', '알려줘' 등의 서술어는 제외하고 명사 위주로 검색어를 만드세요.
-3. 08:00 이전이면 target_date를 전일로 설정하세요. (일요일·공휴일이면 가장 가까운 영업일로 조정)
+3. 08:00 이전이면 target_date를 전일로 설정하세요. (일요일, 공휴일이면 가장 가까운 영업일로 조정)
 4. 섹션 키워드: 주요뉴스, 뉴스, 동향 → 종합뉴스 / 국제금융시장, 금리, 환율, NDF → 금융지표_종합
 
 질문: {question}
@@ -388,8 +388,7 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
     today_obj = datetime.strptime(today_str, "%Y-%m-%d")
 
     # ── 연(年) 단위 범위 감지 ──────────────────────────────────────────────────
-    # 절대 연도: 4자리(2024년), 2자리 약칭(25년) findall로 전체 추출
-    # 두 연도 비교 - re.findall 여러 연도를 모두 추출해 min~max 범위 처리
+    # 절대 연도: 4자리(2024년), 2자리 약칭(25년) findall 전체 추출 / 두 연도 비교 - re.findall 여러 연도 모두 추출해 min~max 범위 처리
     _abs_year_list  = [int(y) for y in re.findall(r"\b(20\d{2}|19\d{2})\s*년", question)]
     # 2자리 약칭: "25년"→2025 (이미 4자리로 파싱된 것과 중복 제거)
     _abbr_year_list = [2000 + int(y) for y in re.findall(r"(?<!\d)([2-9]\d)\s*년", question)
@@ -418,7 +417,7 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
 
     if len(_all_abs_years) >= 2:
         # ── 복수 절대 연도 비교: "25년이랑 26년", "2024년과 2025년" 등 ──────────
-        # 가장 이른 연도 1월 1일 ~ 가장 늦은 연도 12월 31일로 범위 설정
+        # 가장 이른 연도 1월 1일 ~ 가장 늦은 연도 12월 31일 범위 설정
         start_date_str = f"{min(_all_abs_years)}-01-01"
         end_date_str   = f"{max(_all_abs_years)}-12-31"
         target_date    = start_date_str
@@ -546,7 +545,6 @@ def ensure_date_int_metadata():
     최초 1회 실행 후에는 변경 사항이 없으면 빠르게 종료됩니다.
 
     사용법: 스크립트 시작 시 한 번만 호출하세요.
-    예) ensure_date_int_metadata()
     """
     try:
         all_docs = vector_db.get(include=["metadatas"])
@@ -565,7 +563,6 @@ def ensure_date_int_metadata():
                     continue
         
         if ids_to_update:
-            # Chroma LangChain 래퍼는 .update() 미지원 → _collection 직접 접근
             BATCH = 500
             for i in range(0, len(ids_to_update), BATCH):
                 vector_db._collection.update(
@@ -1037,7 +1034,7 @@ def route_from_evaluator(state: AgentState):
 
 def _clean_answer(text: str) -> str:
     """
-    후처리 통합 버전: LaTeX/HTML 오염 차단, 면책 주석 제거, 중복 블록 제거,
+    LaTeX/HTML 오염 차단, 면책 주석 제거, 중복 블록 제거,
     플레이스홀더 제거, 미래 날짜 참고문헌 제거, 미인용 참고문헌 제거
     """
     from datetime import date as _date_today
@@ -1279,7 +1276,6 @@ def answer_generator_node(state: AgentState):
 [참고 문헌]:
 [1] 날짜 | 제목
 [2] 날짜 | 제목
-(최대 5개, 이후 즉시 종료)
 
 질문: {question}
 
@@ -1529,7 +1525,7 @@ def build_graph():
         {"Enough": "answer_generator", "Not_Enough": "web_searcher"},
     )
 
-    # [F] 환각 체크 루프 (answer_regenerator 독립 노드로 분리)
+    # [F] 환각 체크 루프 
     workflow.add_edge("answer_generator", "hallucination_grader")
     workflow.add_conditional_edges(
         "hallucination_grader", route_hallucination,
