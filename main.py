@@ -1132,6 +1132,7 @@ def _clean_answer(text: str) -> str:
         r'|^\s*\[\d+\]\s*날짜\s*$'
         r'|^\s*날짜\s*\|\s*제목.*$'
         r'|^\s*\(최대\s*\d+개.*\).*$'
+        r'|^\s*\(이상\s*최대\s*\d+개.*\).*$'
         r'|^\s*\[참고\s*문헌\]\.\.\.$$'
         r'|^\s*\[\d+\]\s*.*(기타\s*참고\s*자료|선택\s*사항).*$'
         r'|^\s*\[\d+\]\s*.*없음\(최대.*$'
@@ -1140,7 +1141,10 @@ def _clean_answer(text: str) -> str:
         r'|^\s*\(총\s*\d+개\s*참고\s*문헌.*\).*$'
         r'|^\s*\[주석.*\].*$'
         r'|^\s*\[수정\s*내역\].*$'
-        r'|^\s*\[교정\s*피드백\].*$',
+        r'|^\s*\[교정\s*피드백\].*$'
+        r'|^\s*이외\s*추가\s*자료\s*없음.*$'
+        r'|^\s*추가\s*자료\s*없음.*$'
+        r'|^\s*\(추가\s*자료\s*없음.*\).*$',
         re.MULTILINE
     )
     final_text = _placeholder_re.sub('', final_text)
@@ -1148,6 +1152,9 @@ def _clean_answer(text: str) -> str:
     # Document N / 문서 N → [N] 통일
     final_text = re.sub(r'\[?[Dd]ocument\s*#?\s*(\d+)\]?', r'[\1]', final_text)
     final_text = re.sub(r'\[?문서\s*#?\s*(\d+)\]?', r'[\1]', final_text)
+
+    # [[N] 중복 브라켓 제거
+    final_text = re.sub(r'\[\[(\d+)\]', r'[\1]', final_text)
 
     # 미래 날짜 참고문헌 제거 + 구분선 제거
     today_str = _date_today.today().strftime("%Y-%m-%d")
