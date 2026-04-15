@@ -1064,7 +1064,7 @@ def _clean_answer(text: str) -> str:
     seen_lines = set()
     in_ref_section = False
     ref_section_line_count = 0
-    _REF_MAX_LINES = 6
+    _REF_MAX_LINES = 7  # 빈 줄 포함 최대 5개 항목 수용
 
     for line in lines:
         stripped = line.strip()
@@ -1079,12 +1079,14 @@ def _clean_answer(text: str) -> str:
         if re.search(r"^\[참고\s*문헌\]|^참고\s*문헌[:\s]", stripped):
             in_ref_section = True
             ref_section_line_count = 0
+            cleaned.append(line)  # 헤더는 카운트 없이 바로 추가
+            continue
 
         if in_ref_section and stripped:
             ref_section_line_count += 1
             if ref_section_line_count > _REF_MAX_LINES:
                 break
-            if ref_section_line_count > 1 and len(stripped) > 120:
+            if len(stripped) > 120:
                 cleaned.append(stripped[:120])
                 continue
 
@@ -1172,19 +1174,20 @@ def _clean_answer(text: str) -> str:
             filtered.append(line)
         final_text = body + "\n".join(filtered)
 
-    # 미인용 참고문헌 제거
+    # 미인용 참고문헌 제거 (본문에 인용이 하나라도 있을 때만 필터링)
     ref_sec_match2 = re.search(r'(^\[참고\s*문헌\].*$)', final_text, re.MULTILINE)
     if ref_sec_match2:
         body = final_text[:ref_sec_match2.start()]
         ref_section = final_text[ref_sec_match2.start():]
         cited = set(re.findall(r'\[(\d+)\]', body))
-        filtered = []
-        for line in ref_section.split("\n"):
-            ref_num = re.match(r'^\s*\[(\d+)\]', line)
-            if ref_num and ref_num.group(1) not in cited:
-                continue
-            filtered.append(line)
-        final_text = body + "\n".join(filtered)
+        if cited:  # 인용 표기가 없으면 전체 삭제를 방지하고 그대로 유지
+            filtered = []
+            for line in ref_section.split("\n"):
+                ref_num = re.match(r'^\s*\[(\d+)\]', line)
+                if ref_num and ref_num.group(1) not in cited:
+                    continue
+                filtered.append(line)
+            final_text = body + "\n".join(filtered)
 
     # 본문 없이 참고문헌만 남은 경우 원본 반환
     body_check = re.sub(r'(^|\n)\[참고\s*문헌\][\s\S]*', '', final_text, flags=re.MULTILINE).strip()
