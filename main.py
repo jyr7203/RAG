@@ -1142,7 +1142,10 @@ def _clean_answer(text: str) -> str:
         r'|^\s*\[\d+\]\s*날짜\s*$'
         r'|^\s*날짜\s*\|\s*제목.*$'
         r'|^\s*\(최대\s*\d+개.*종료\).*$'
-        r'|^\s*\[참고\s*문헌\]\.\.\.$$',
+        r'|^\s*\(이상\s*최대\s*\d+개.*\).*$'
+        r'|^\s*이외\s*추가\s*자료\s*없음.*$'
+        r'|^\s*\[참고\s*문헌\]\.\.\.$$'
+        r'|^\s*\[/[^\]]+\]\s*$',
         re.MULTILINE
     )
     final_text = _placeholder_re.sub('', final_text)
