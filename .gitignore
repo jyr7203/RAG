@@ -1,0 +1,33 @@
+# 환경변수 (API 키 등 민감 정보)
+.env
+
+
+# Vector DB
+chroma_db_bge/
+
+# 로그
+logs/
+*.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.Python
+*.egg-info/
+dist/
+build/
+
+# 가상환경
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
