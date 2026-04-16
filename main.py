@@ -1142,10 +1142,9 @@ def _clean_answer(text: str) -> str:
         r'|^\s*\[\d+\]\s*날짜\s*$'
         r'|^\s*날짜\s*\|\s*제목.*$'
         r'|^\s*\(최대\s*\d+개.*종료\).*$'
-        r'|^\s*\(이상\s*최대\s*\d+개.*\).*$'
+        r'|^\s*\(이상\s*최대\s*\d+개[^)]*\).*$'
         r'|^\s*이외\s*추가\s*자료\s*없음.*$'
-        r'|^\s*\[참고\s*문헌\]\.\.\.$$'
-        r'|^\s*\[/[^\]]+\]\s*$',
+        r'|^\s*\[참고\s*문헌\]\.\.\.$$',
         re.MULTILINE
     )
     final_text = _placeholder_re.sub('', final_text)
@@ -1154,6 +1153,21 @@ def _clean_answer(text: str) -> str:
     # 후처리 4: "Document N" / "문서 N" → "[N]" 통일
     final_text = re.sub(r'\[?[Dd]ocument\s*#?\s*(\d+)\]?', r'[\1]', final_text)
     final_text = re.sub(r'\[?문서\s*#?\s*(\d+)\]?',         r'[\1]', final_text)
+
+    # 후처리 5: [[N] 중복 브라켓 제거
+    final_text = re.sub(r'\[\[(\d+)\]', r'[\1]', final_text)
+
+    # 후처리 6: 참고문헌 앞 --- 구분선 제거
+    final_text = re.sub(r'\n---\s*\n(\[참고)', r'\n\1', final_text)
+
+    # 후처리 7: **참고 문헌** 볼드 형태 정규화
+    final_text = re.sub(r'\*\*참고\s*문헌\*\*', '[참고 문헌]', final_text)
+
+    # 후처리 8: [/뿅] 등 이상한 토큰 제거
+    final_text = re.sub(r'\[/[^\]]+\]', '', final_text)
+
+    # 후처리 9: 빈 참고문헌 섹션 제거
+    final_text = re.sub(r'\n\[참고\s*문헌\][:\s]*\n?(\s*\n)*$', '', final_text, flags=re.MULTILINE).strip()
 
     return final_text
 
