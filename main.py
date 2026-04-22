@@ -1043,7 +1043,7 @@ def _clean_answer(text: str) -> str:
         r"\\section\{", r"\\subsection\{", r"\\begin\{",
         r"\\cite\{",    r"\\label\{",      r"\\ref\{",
         r"\\textbf\{",  r"\\emph\{",
-        r"\\\\(", r"\\\\[",
+        r"\\\\\(", r"\\\\\[",
         r"\\mathrm\{", r"\\frac\{", r"\\sqrt\{",
     ]
     _HTML_MARKERS = [
@@ -1052,7 +1052,6 @@ def _clean_answer(text: str) -> str:
         r"<div[\s>]",     r"</div>",
         r"<table[\s>]",   r"<tr[\s>]", r"<td[\s>]",
         r"<ul[\s>]",      r"<ol[\s>]", r"<li[\s>]",
-        # [BUG FIX] 잔여 역할 태그 및 hex 오염 패턴 추가
         r"</assistant>", r"<assistant>",
         r"<hex>",        r"</hex>",
         r"<\|assistant\|>", r"<\|user\|>",
@@ -1144,7 +1143,7 @@ def _clean_answer(text: str) -> str:
         r'|^\s*\(최대\s*\d+개.*종료\).*$'
         r'|^\s*\(이상\s*최대\s*\d+개[^)]*\).*$'
         r'|^\s*이외\s*추가\s*자료\s*없음.*$'
-        r'|^\s*\[참고\s*문헌\]\.\.\.$$',
+        r'|^\s*\[참고\s*문헌\]\.\.\.$',
         re.MULTILINE
     )
     final_text = _placeholder_re.sub('', final_text)
@@ -1163,7 +1162,7 @@ def _clean_answer(text: str) -> str:
     # 후처리 7: **참고 문헌** 볼드 형태 정규화
     final_text = re.sub(r'\*\*참고\s*문헌\*\*', '[참고 문헌]', final_text)
 
-    # 후처리 8: [/뿅] 등 이상한 토큰 제거
+    # 후처리 8: 이상한 토큰 제거
     final_text = re.sub(r'\[/[^\]]+\]', '', final_text)
 
     # 후처리 9: 빈 참고문헌 섹션 제거
@@ -1178,7 +1177,7 @@ def answer_generator_node(state: AgentState):
     topic = state.get("topic")
 
     if topic == "off_topic":
-        # 감정 표현 + 금융 키워드가 섞인 경우 공감하며 금융 주제로 안내
+        # 감정 표현과 금융 키워드가 섞인 경우 공감하며 금융 주제로 안내
         _finance_kw_in_q = any(k in state.get("question","") for k in [
             "금리","환율","달러","주가","증시","채권","금융","코스피","나스닥"
         ])
@@ -1428,7 +1427,7 @@ def answer_regenerator_node(state: AgentState):
 [금지사항]
 1. "[수정 내역]", "[교정 피드백]", "[생성된 답변]" 등 교정 과정에 대한 설명이나 메타 정보를 절대로 출력하지 마세요.
 2. 오직 사용자에게 바로 보여줄 [요약], [상세 분석], [참고 문헌] 섹션만 깔끔하게 출력하세요.
-3. 근거 문서에 없는 외부 지식(예: 미국 금리 인상, 글로벌 경제 둔화 등)을 임의로 덧붙이지 마세요.
+3. 근거 문서에 없는 외부 지식을 임의로 덧붙이지 마세요.
 
 [핵심 교정 피드백]
 {feedback}
