@@ -492,6 +492,7 @@ CATEGORY: 금리 또는 환율 또는 주식 또는 기타"""
         days_since_monday = today_obj.weekday()  # 월=0, 일=6
         start_date_str = (today_obj - timedelta(days=days_since_monday)).strftime("%Y-%m-%d")
         end_date_str   = today_str
+        target_date    = today_str
     elif any(kw in question for kw in ["달", "개월"]):
         start_date_str = (target_date_obj - relativedelta(months=1)).strftime("%Y-%m-%d")
         end_date_str = target_date
@@ -575,8 +576,10 @@ def ensure_date_int_metadata():
     except Exception as e:
         log.warning(f"[date_int 마이그레이션 실패] {e} — 문자열 후처리 방식으로 폴백합니다.")
 
-def get_target_item(target_section: str) -> str | None:
+def get_target_item(target_section: str | None) -> str | None:
     """중복되는 target_item 매핑 로직을 함수로 분리"""
+    if not target_section:
+        return None
     if target_section in ("주요뉴스", "종합뉴스"):
         return "종합뉴스"
     elif target_section in ("국제금융시장", "금융지표_종합"):
@@ -895,7 +898,7 @@ def context_filter_node(state: AgentState):
 
     if not is_empty_response:
         id_matches = re.findall(r"\d+", raw_res)
-        valid_ids = set([int(x) for x in id_matches if int(x) < len(documents)])
+        valid_ids = {int(x) for x in id_matches if int(x) < len(documents)}
         
         for i, doc in enumerate(documents):
             if i in valid_ids:
@@ -1324,7 +1327,7 @@ def hallucination_grader_node(state: AgentState):
         print(">> [Skip] 데이터 없음 응답 → 환각 검사 생략, PASS 처리")
         return {"hallucination_score": "yes", "analysis_note": "데이터 없음 응답 → PASS"}
     # 웹 기반 답변이 "데이터 없음"만으로 구성된 경우 스킵 허용
-    if is_mostly_web and all(m in answer_str for m in ["찾을 수 없습니다"]) and len(answer_str.strip()) < 100:
+    if is_mostly_web and any(m in answer_str for m in ["찾을 수 없습니다"]) and len(answer_str.strip()) < 100:
         print(">> [Skip] 웹 기반 데이터 없음 단독 응답 → PASS 처리")
         return {"hallucination_score": "yes", "analysis_note": "데이터 없음 응답 → PASS"}
 
