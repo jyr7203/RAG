@@ -150,11 +150,6 @@ def input_router_node(state: AgentState):
         "란 무엇", "는 무엇", "뭐야", "뭐지", "이란", "이란 무엇", "무엇인가",
         "어떤 질문", "무슨 질문", "잘 답변", "응답 잘"
     ]
-    # off_topic 사전 판단 키워드 — 감정 표현/욕설 또는 투자 조언 요청
-    _off_topic_pre = [
-        "짜증", "열받", "빡쳐","존나",
-        "욕설", "꺼져", "닥쳐", "미치겠", "빡친", "화난다",
-    ]
     # 투자 조언/추천 요청 — finance 키워드가 있어도 off_topic으로 처리
     _invest_advice = [
         "추천해줘", "추천해 줘", "추천 해줘", "뭐 사야", "뭘 사야",
@@ -167,14 +162,13 @@ def input_router_node(state: AgentState):
         "관세", "트럼프", "연준", "기준금리", "국채", "펀드", "ETF", "선물",
     ]
 
-    has_general_kw  = any(k in question for k in _general_pre)
-    has_finance_kw  = any(k in question for k in _finance_keywords)
-    has_off_topic   = any(k in question for k in _off_topic_pre)
+    has_general_kw    = any(k in question for k in _general_pre)
+    has_finance_kw    = any(k in question for k in _finance_keywords)
     has_invest_advice = any(k in question for k in _invest_advice)
 
-    # off_topic 사전 판단 — 감정/욕설 또는 투자 조언 요청은 off_topic
-    if has_off_topic or has_invest_advice:
-        print(f">> topic=off_topic | requires_search=False (사전 감정/욕설 판단)")
+    # off_topic 사전 판단 — 투자 조언 요청은 off_topic
+    if has_invest_advice:
+        print(f">> topic=off_topic | requires_search=False (투자 조언 사전 판단)")
         return {
             "topic": "off_topic",
             "is_fallback": True,
